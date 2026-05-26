@@ -12,9 +12,8 @@ export default function ProjectsView({ onSelect }) {
         const hus = [...new Set(proj.tasks.map((t) => t.a))].map((id) => getHuman(id)).filter(Boolean);
         return (
           <div key={proj.id} onClick={() => onSelect({ type: "project", id: proj.id })}
-            style={{ background: S, border: "1px solid " + BR, borderRadius: 10, padding: "13px 14px", cursor: "pointer" }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "#16162a"}
-            onMouseLeave={(e) => e.currentTarget.style.background = S}>
+            className="card-hover"
+            style={{ background: S, border: "1px solid " + BR, borderRadius: 10, padding: "13px 14px", cursor: "pointer" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: T, marginBottom: 5 }}>{proj.title}</div>

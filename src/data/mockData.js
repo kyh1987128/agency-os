@@ -56,21 +56,21 @@ export const PROJS = [
 ];
 
 export const STATUS = {
-  active:   { label: "진행중", c: "#f59e0b", bg: "#f59e0b15" },
-  planning: { label: "기획중", c: "#38bdf8", bg: "#38bdf815" },
-  review:   { label: "검토중", c: "#818cf8", bg: "#818cf815" },
-  done:     { label: "완료",   c: "#34d399", bg: "#34d39915" },
+  active:   { label: "진행중", c: "#d97706", bg: "#fef3c7" },
+  planning: { label: "기획중", c: "#0284c7", bg: "#e0f2fe" },
+  review:   { label: "검토중", c: "#6366f1", bg: "#ede9fe" },
+  done:     { label: "완료",   c: "#16a34a", bg: "#dcfce7" },
 };
 
-export const TASK_STATUS_COLOR = { done: "#34d399", active: "#f59e0b", todo: "#475569" };
+export const TASK_STATUS_COLOR = { done: "#16a34a", active: "#d97706", todo: "#94a3b8" };
 
 export const COLORS = {
-  bg:      "#0d0d16",
-  surface: "#11111e",
-  border:  "#1e1e30",
-  text:    "#e2e8f0",
-  muted:   "#4a5568",
-  accent:  "#818cf8",
+  bg:      "#f1f5f9",
+  surface: "#ffffff",
+  border:  "#e2e8f0",
+  text:    "#1e293b",
+  muted:   "#64748b",
+  accent:  "#6366f1",
 };
 
 export const getDept  = (id) => DEPTS.find((d) => d.id === id);

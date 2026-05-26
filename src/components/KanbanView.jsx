@@ -29,9 +29,8 @@ export default function KanbanView({ onSelect }) {
                 const d  = getDept(task.proj.dept);
                 return (
                   <div key={task.key} onClick={() => onSelect({ type: "task", proj: task.proj, task, human: hu })}
-                    style={{ background: S, border: "1px solid " + BR, borderLeft: "3px solid " + col.c, borderRadius: 7, padding: "10px 11px", cursor: "pointer" }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = "#16162a"}
-                    onMouseLeave={(e) => e.currentTarget.style.background = S}>
+                    className="card-hover"
+                    style={{ background: S, border: "1px solid " + BR, borderLeft: "3px solid " + col.c, borderRadius: 7, padding: "10px 11px", cursor: "pointer" }}>
                     <div style={{ fontSize: 12, fontWeight: 500, color: T, marginBottom: 5 }}>{task.t}</div>
                     <div style={{ fontSize: 10, color: d?.color, marginBottom: 6 }}>{task.proj.title.slice(0, 22)}</div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

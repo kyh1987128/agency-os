@@ -2,6 +2,7 @@ import { useState } from "react";
 import { HUMANS } from "../data/humans";
 import { AI_AGENTS } from "../data/agents";
 import { DEPTS, PROJS, COLORS, getDept, STATUS } from "../data/mockData";
+import PixelAvatar from "./PixelAvatar";
 
 const { bg: B, surface: S, border: BR, text: T, muted: M } = COLORS;
 
@@ -14,7 +15,7 @@ export default function RightPanel({ onSelect }) {
   const selectAI    = (ai) => { setSelItem({ type: "ai",    ...ai }); setView("ai-detail");    onSelect({ type: "ai",   id: ai.id }); };
 
   return (
-    <div style={{ width: 268, background: "#09090f", borderLeft: "1px solid " + BR, display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
+    <div style={{ width: 268, background: "#ffffff", borderLeft: "1px solid " + BR, display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
       {/* Header */}
       <div style={{ padding: "11px 12px 8px", borderBottom: "1px solid " + BR, flexShrink: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -34,12 +35,11 @@ export default function RightPanel({ onSelect }) {
           </div>
           {HUMANS.map((h) => (
             <div key={h.id} onClick={() => selectHuman(h)}
-              style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", cursor: "pointer", borderBottom: "1px solid " + BR + "44", transition: "background .1s" }}
-              onMouseEnter={(e) => e.currentTarget.style.background = "#13131e"}
-              onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+              className="panel-item-hover"
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", cursor: "pointer", borderBottom: "1px solid " + BR + "44" }}>
               <div style={{ position: "relative", flexShrink: 0 }}>
-                <div style={{ width: 32, height: 32, borderRadius: 8, background: h.color + "18", border: "1.5px solid " + h.color + "33", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{h.avatar}</div>
-                <div style={{ position: "absolute", bottom: -1, right: -1, width: 8, height: 8, borderRadius: "50%", background: h.status === "active" ? "#34d399" : "#f59e0b", border: "1.5px solid #09090f" }} />
+                <PixelAvatar id={h.id} size={32} color={h.color} />
+                <div style={{ position: "absolute", bottom: -1, right: -1, width: 8, height: 8, borderRadius: "50%", background: h.status === "active" ? "#16a34a" : "#f59e0b", border: "1.5px solid #ffffff" }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: T, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</div>
@@ -76,12 +76,11 @@ export default function RightPanel({ onSelect }) {
                 <div style={{ padding: "5px 10px 3px", fontSize: 9, color: dept.color, fontWeight: 700, background: dept.color + "08", borderBottom: "1px solid " + dept.color + "18", fontFamily: "monospace", letterSpacing: 1 }}>{dept.name}팀</div>
                 {deptAIs.map((ai) => (
                   <div key={ai.id} onClick={() => selectAI(ai)}
-                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", cursor: "pointer", borderBottom: "1px solid " + BR + "33", transition: "background .1s" }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = "#13131e"}
-                    onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                    className="panel-item-hover"
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", cursor: "pointer", borderBottom: "1px solid " + BR + "33" }}>
                     <div style={{ position: "relative", flexShrink: 0 }}>
-                      <div style={{ width: 30, height: 30, borderRadius: 7, background: ai.color + "15", border: "1.5px solid " + ai.color + "33", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>{ai.avatar}</div>
-                      <div style={{ position: "absolute", bottom: -1, right: -1, width: 7, height: 7, borderRadius: "50%", background: ai.status === "active" ? "#34d399" : "#475569", border: "1.5px solid #09090f" }} />
+                      <PixelAvatar id={ai.id} size={30} color={ai.color} />
+                      <div style={{ position: "absolute", bottom: -1, right: -1, width: 7, height: 7, borderRadius: "50%", background: ai.status === "active" ? "#16a34a" : "#475569", border: "1.5px solid #ffffff" }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: ai.color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ai.name}</div>
@@ -98,15 +97,46 @@ export default function RightPanel({ onSelect }) {
       {/* HUMAN DETAIL */}
       {view === "human-detail" && selItem && (
         <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, background: S, border: "1px solid " + selItem.color + "33", borderRadius: 8, padding: 12 }}>
-            <div style={{ width: 44, height: 44, borderRadius: 10, background: selItem.color + "18", border: "2px solid " + selItem.color + "44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>{selItem.avatar}</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: T }}>{selItem.name}</div>
-              <div style={{ fontSize: 11, color: selItem.color }}>{selItem.title}</div>
-              <div style={{ fontSize: 10, color: "#34d399", marginTop: 2 }}>{selItem.mood}</div>
+          {/* RPG 프로필 카드 */}
+          <div style={{ background: S, border: "1px solid " + selItem.color + "44", borderRadius: 10, padding: 14, marginBottom: 12, position: "relative", overflow: "hidden" }}>
+            {/* 배경 장식 */}
+            <div style={{ position: "absolute", top: -20, right: -20, width: 80, height: 80, borderRadius: "50%", background: selItem.color + "08" }} />
+            <div style={{ position: "absolute", bottom: -15, left: -15, width: 50, height: 50, borderRadius: "50%", background: selItem.color + "06" }} />
+
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 12 }}>
+              <div style={{ position: "relative", flexShrink: 0 }}>
+                <PixelAvatar id={selItem.id} size={52} color={selItem.color} />
+                {/* 레벨 뱃지 */}
+                <div style={{ position: "absolute", bottom: -4, left: "50%", transform: "translateX(-50%)", background: selItem.color, color: "#fff", fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 6, whiteSpace: "nowrap" }}>
+                  Lv.{(selItem.id.charCodeAt(1) % 20) + 10}
+                </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: T, marginBottom: 2 }}>{selItem.name}</div>
+                <div style={{ fontSize: 11, color: selItem.color, marginBottom: 4 }}>{selItem.title}</div>
+                <div style={{ fontSize: 10, color: "#16a34a", background: "#dcfce7", padding: "2px 8px", borderRadius: 8, display: "inline-block" }}>{selItem.mood}</div>
+              </div>
             </div>
+
+            {/* 능력치 바 */}
+            {[
+              { label: "창의력", val: ((selItem.id.charCodeAt(1) * 7) % 40) + 60 },
+              { label: "실행력", val: ((selItem.id.charCodeAt(1) * 13) % 40) + 55 },
+              { label: "협업력", val: ((selItem.id.charCodeAt(1) * 11) % 35) + 65 },
+            ].map((stat) => (
+              <div key={stat.label} style={{ marginBottom: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                  <span style={{ fontSize: 9, color: M, fontFamily: "monospace" }}>{stat.label}</span>
+                  <span style={{ fontSize: 9, color: selItem.color, fontWeight: 700 }}>{stat.val}</span>
+                </div>
+                <div style={{ height: 4, background: BR, borderRadius: 2 }}>
+                  <div style={{ height: 4, width: stat.val + "%", background: "linear-gradient(90deg," + selItem.color + "," + selItem.color + "88)", borderRadius: 2, transition: "width 0.5s" }} />
+                </div>
+              </div>
+            ))}
           </div>
-          <div style={{ fontSize: 10, color: M, fontWeight: 600, marginBottom: 6 }}>담당 프로젝트</div>
+
+          <div style={{ fontSize: 10, color: M, fontWeight: 700, marginBottom: 8, fontFamily: "monospace", letterSpacing: 1 }}>◆ 담당 프로젝트</div>
           {PROJS.filter((p) => p.tasks.some((t) => t.a === selItem.id)).map((proj) => {
             const d = getDept(proj.dept);
             const s = STATUS[proj.status];
@@ -129,23 +159,56 @@ export default function RightPanel({ onSelect }) {
       {/* AI DETAIL */}
       {view === "ai-detail" && selItem && (
         <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
-          <div style={{ background: S, border: "1px solid " + selItem.color + "33", borderRadius: 8, padding: 14, marginBottom: 12 }}>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
-              <div style={{ width: 44, height: 44, borderRadius: 10, background: selItem.color + "18", border: "2px solid " + selItem.color + "44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>{selItem.avatar}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: selItem.color }}>{selItem.name}</div>
-                <div style={{ fontSize: 11, color: T }}>{selItem.title}</div>
-                <div style={{ fontSize: 9, color: getDept(selItem.dept)?.color, fontFamily: "monospace" }}>{getDept(selItem.dept)?.name}팀</div>
+          {/* RPG 프로필 카드 */}
+          <div style={{ background: S, border: "1px solid " + selItem.color + "44", borderRadius: 10, padding: 14, marginBottom: 12, position: "relative", overflow: "hidden" }}>
+            {/* 배경 장식 */}
+            <div style={{ position: "absolute", top: -20, right: -20, width: 80, height: 80, borderRadius: "50%", background: selItem.color + "08" }} />
+            <div style={{ position: "absolute", bottom: -15, left: -15, width: 50, height: 50, borderRadius: "50%", background: selItem.color + "06" }} />
+
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
+              <div style={{ position: "relative", flexShrink: 0 }}>
+                <PixelAvatar id={selItem.id} size={52} color={selItem.color} />
+                {/* 레벨 뱃지 */}
+                <div style={{ position: "absolute", bottom: -4, left: "50%", transform: "translateX(-50%)", background: selItem.color, color: "#fff", fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 6, whiteSpace: "nowrap" }}>
+                  AI Lv.{(selItem.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 30) + 50}
+                </div>
               </div>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: selItem.status === "active" ? "#34d399" : "#475569", flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: selItem.color, marginBottom: 2 }}>{selItem.name}</div>
+                <div style={{ fontSize: 11, color: T, marginBottom: 2 }}>{selItem.title}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: selItem.status === "active" ? "#34d399" : "#475569" }} />
+                  <span style={{ fontSize: 9, color: getDept(selItem.dept)?.color, fontFamily: "monospace" }}>{getDept(selItem.dept)?.name}팀</span>
+                </div>
+              </div>
             </div>
+
             <div style={{ fontSize: 11, color: M, lineHeight: 1.7, padding: "8px 10px", background: B, borderRadius: 6, marginBottom: 10, fontStyle: "italic" }}>"{selItem.desc}"</div>
-            <div style={{ fontSize: 10, color: M, marginBottom: 4 }}>현재 작업</div>
-            <div style={{ fontSize: 12, color: selItem.status === "active" ? selItem.color : M, fontWeight: selItem.status === "active" ? 600 : 400 }}>
+
+            <div style={{ fontSize: 10, color: M, marginBottom: 6 }}>현재 작업</div>
+            <div style={{ fontSize: 11, color: selItem.status === "active" ? selItem.color : M, fontWeight: selItem.status === "active" ? 600 : 400, marginBottom: 12 }}>
               {selItem.status === "active" ? "▶ " + selItem.task : "● 대기중"}
             </div>
+
+            {/* AI 능력치 바 */}
+            {[
+              { label: "처리속도", val: ((selItem.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) * 7) % 30) + 70 },
+              { label: "정확도",   val: ((selItem.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) * 11) % 25) + 75 },
+              { label: "학습률",   val: ((selItem.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) * 13) % 35) + 60 },
+            ].map((stat) => (
+              <div key={stat.label} style={{ marginBottom: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                  <span style={{ fontSize: 9, color: M, fontFamily: "monospace" }}>{stat.label}</span>
+                  <span style={{ fontSize: 9, color: selItem.color, fontWeight: 700 }}>{stat.val}</span>
+                </div>
+                <div style={{ height: 4, background: BR, borderRadius: 2 }}>
+                  <div style={{ height: 4, width: stat.val + "%", background: "linear-gradient(90deg," + selItem.color + "," + selItem.color + "88)", borderRadius: 2, transition: "width 0.5s" }} />
+                </div>
+              </div>
+            ))}
           </div>
-          <div style={{ fontSize: 10, color: M, fontWeight: 600, marginBottom: 6 }}>연관 프로젝트</div>
+
+          <div style={{ fontSize: 10, color: M, fontWeight: 700, marginBottom: 8, fontFamily: "monospace", letterSpacing: 1 }}>◆ 연관 프로젝트</div>
           {PROJS.filter((p) => p.dept === selItem.dept).map((proj) => {
             const d = getDept(proj.dept);
             return (

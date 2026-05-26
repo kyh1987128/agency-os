@@ -1,101 +1,326 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef } from "react";
 import * as d3 from "d3";
-import { PROJS, COLORS, getDept } from "../data/mockData";
+import { PROJS, getDept, TASK_STATUS_COLOR } from "../data/mockData";
 import { getHuman } from "../data/humans";
+import { AI_AGENTS } from "../data/agents";
 
-const { border: BR } = COLORS;
-const W = 700, H = 260;
+// ── Graph data: Project-centric ───────────────────────────────────────────────
+// Project = hub → Tasks → Assignees (human/AI)
+// Department expressed via color only, no dept hub nodes
+function buildGraph() {
+  const nodes = [];
+  const links = [];
+  const addedHumans = new Set();
+  const addedAgents = new Set();
 
-export default function OntologyGraph({ onNodeClick }) {
-  const svgRef = useRef(null);
-  const [expanded, setExpanded] = useState({});
-  const [positions, setPositions] = useState({});
-  const posRef = useRef({});
+  PROJS.forEach((proj) => {
+    const dept = getDept(proj.dept);
+    const deptColor = dept?.color || "#6366f1";
 
-  const { nodes, links } = useMemo(() => {
-    const ns = [], ls = [];
-    PROJS.forEach((p) => {
-      const d = getDept(p.dept);
-      ns.push({ id: p.id, type: "proj", r: 22, color: "#00d4ff", label: p.title.slice(0, 9) + (p.title.length > 9 ? "…" : ""), data: p });
-      if (expanded[p.id]) {
-        p.tasks.forEach((t, i) => {
-          const tid = p.id + "_t" + i;
-          const tc = t.s === "done" ? "#00ff88" : t.s === "active" ? "#ffa500" : "#446688";
-          const hu = getHuman(t.a);
-          ns.push({ id: tid, type: "task", r: 12, color: tc, label: t.t, sub: hu?.name || "", data: { task: t, proj: p, human: hu } });
-          ls.push({ source: p.id, target: tid, c: d?.color || "#444" });
+    nodes.push({
+      id: proj.id,
+      type: "proj",
+      label: proj.title,
+      color: deptColor,
+      dept: dept?.name || "",
+      deptColor,
+      r: 22,
+      projData: proj,
+    });
+
+    proj.tasks.forEach((task, i) => {
+      const taskId = `${proj.id}_t${i}`;
+      const sc = TASK_STATUS_COLOR[task.s] || "#94a3b8";
+
+      nodes.push({
+        id: taskId,
+        type: "task",
+        label: task.t,
+        color: sc,
+        r: 10,
+        taskData: task,
+        projId: proj.id,
+        assignee: task.a,
+      });
+
+      links.push({
+        id: `pt_${taskId}`,
+        source: proj.id,
+        target: taskId,
+        color: deptColor + "55",
+        strokeWidth: 1.5,
+        dash: null,
+      });
+
+      // Task → Human assignee
+      const human = getHuman(task.a);
+      if (human) {
+        const humanNodeId = `human_${human.id}`;
+        if (!addedHumans.has(human.id)) {
+          addedHumans.add(human.id);
+          nodes.push({
+            id: humanNodeId,
+            type: "human",
+            label: human.name,
+            avatar: human.avatar,
+            color: human.color,
+            r: 16,
+            humanData: human,
+          });
+        }
+        links.push({
+          id: `th_${taskId}_${human.id}`,
+          source: taskId,
+          target: humanNodeId,
+          color: human.color + "55",
+          strokeWidth: 1,
+          dash: "4 3",
         });
       }
     });
-    return { nodes: ns, links: ls };
-  }, [expanded]);
+  });
+
+  // AI agents → connected to matching dept projects
+  AI_AGENTS.forEach((agent) => {
+    const matchingProj = PROJS.find((p) => p.dept === agent.dept);
+    if (!matchingProj) return;
+
+    if (!addedAgents.has(agent.id)) {
+      addedAgents.add(agent.id);
+      nodes.push({
+        id: agent.id,
+        type: "agent",
+        label: agent.name,
+        color: "#8b5cf6",
+        r: 9,
+        agentData: agent,
+      });
+    }
+
+    links.push({
+      id: `ap_${agent.id}_${matchingProj.id}`,
+      source: agent.id,
+      target: matchingProj.id,
+      color: "#8b5cf633",
+      strokeWidth: 0.8,
+      dash: "2 4",
+    });
+  });
+
+  return { nodes, links };
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+export default function OntologyGraph({ onNodeClick }) {
+  const svgRef      = useRef(null);
+  const containerRef = useRef(null);
+  const simRef      = useRef(null);
 
   useEffect(() => {
-    if (!nodes.length) return;
-    const sn = nodes.map((n) => ({
-      id: n.id, r: n.r,
-      x: posRef.current[n.id]?.x ?? (W / 2 + (Math.random() - 0.5) * 240),
-      y: posRef.current[n.id]?.y ?? (H / 2 + (Math.random() - 0.5) * 100),
-    }));
-    const sl = links.map((l) => ({ source: l.source, target: l.target }));
-    const sim = d3.forceSimulation(sn)
-      .force("link",    d3.forceLink(sl).id((d) => d.id).distance(85).strength(1))
-      .force("charge",  d3.forceManyBody().strength(-600))
-      .force("center",  d3.forceCenter(W / 2, H / 2))
-      .force("collide", d3.forceCollide().radius((d) => d.r + 20).strength(1))
-      .stop();
-    for (let i = 0; i < 500; i++) sim.tick();
-    const p = {};
-    sn.forEach((n) => {
-      posRef.current[n.id] = { x: Math.max(30, Math.min(W - 30, n.x)), y: Math.max(25, Math.min(H - 25, n.y)) };
-      p[n.id] = posRef.current[n.id];
-    });
-    setPositions(p);
-  }, [nodes.map((n) => n.id).join(",")]);
+    const container = containerRef.current;
+    const svgEl     = svgRef.current;
+    if (!container || !svgEl) return;
 
-  const clickNode = (node) => {
-    if (node.type === "proj") setExpanded((e) => ({ ...e, [node.id]: !e[node.id] }));
-    onNodeClick(node.type === "proj" ? { type: "project", id: node.id } : { type: "task", ...node.data });
-  };
+    const width  = container.clientWidth  || 900;
+    const height = container.clientHeight || 480;
+
+    const svg = d3.select(svgEl).attr("width", width).attr("height", height);
+    svg.selectAll("*").remove();
+
+    // Zoom / pan
+    const g    = svg.append("g");
+    const zoom = d3.zoom().scaleExtent([0.2, 4]).on("zoom", (e) => g.attr("transform", e.transform));
+    svg.call(zoom);
+
+    const linkLayer = g.append("g");
+    const nodeLayer = g.append("g");
+
+    const { nodes, links } = buildGraph();
+
+    if (simRef.current) simRef.current.stop();
+    const sim = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(links).id((d) => d.id)
+        .distance((d) => {
+          const st = (d.source?.type || "") + "-" + (d.target?.type || "");
+          if (st === "proj-task")   return 75;
+          if (st === "task-human")  return 55;
+          if (st === "agent-proj")  return 90;
+          return 70;
+        })
+        .strength(0.65))
+      .force("charge", d3.forceManyBody().strength((d) => {
+        if (d.type === "proj")  return -520;
+        if (d.type === "human") return -260;
+        if (d.type === "task")  return -130;
+        return -80;
+      }))
+      .force("center",  d3.forceCenter(width / 2, height / 2))
+      .force("collide", d3.forceCollide((d) => d.r + 14))
+      .force("x", d3.forceX(width  / 2).strength(0.03))
+      .force("y", d3.forceY(height / 2).strength(0.03));
+    simRef.current = sim;
+
+    // Links
+    const linkSel = linkLayer.selectAll("line")
+      .data(links, (d) => d.id)
+      .join("line")
+      .attr("stroke",           (d) => d.color)
+      .attr("stroke-width",     (d) => d.strokeWidth)
+      .attr("stroke-dasharray", (d) => d.dash || null)
+      .attr("stroke-linecap", "round");
+
+    // Node groups
+    const nodeG = nodeLayer.selectAll("g.node")
+      .data(nodes, (d) => d.id)
+      .join("g")
+      .attr("class", "node")
+      .style("cursor", "pointer")
+      .call(d3.drag()
+        .on("start", (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on("drag",  (e, d) => { d.fx = e.x; d.fy = e.y; })
+        .on("end",   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }))
+      .on("click", (e, d) => {
+        e.stopPropagation();
+        if (!onNodeClick) return;
+        if (d.type === "proj")  onNodeClick({ type: "project", id: d.id, data: d.projData });
+        if (d.type === "task")  {
+          const proj  = PROJS.find((p) => p.id === d.projId);
+          const human = getHuman(d.assignee);
+          onNodeClick({ type: "task", proj, task: d.taskData, human });
+        }
+        if (d.type === "human") onNodeClick({ type: "human", human: d.humanData });
+        if (d.type === "agent") onNodeClick({ type: "agent", agentData: d.agentData });
+      });
+
+    // Circle fill
+    nodeG.append("circle")
+      .attr("r",    (d) => d.r)
+      .attr("fill", (d) => d.color + (d.type === "proj" ? "20" : d.type === "human" ? "18" : "22"))
+      .attr("stroke",       (d) => d.color)
+      .attr("stroke-width", (d) => d.type === "proj" ? 2.5 : d.type === "human" ? 2 : 1.5);
+
+    // Outer dashed ring for project nodes
+    nodeG.filter((d) => d.type === "proj")
+      .append("circle")
+      .attr("r", (d) => d.r + 5)
+      .attr("fill", "none")
+      .attr("stroke",           (d) => d.color + "33")
+      .attr("stroke-width",     1)
+      .attr("stroke-dasharray", "5 3");
+
+    // Progress arc inside project circle
+    nodeG.filter((d) => d.type === "proj")
+      .append("path")
+      .attr("pointer-events", "none")
+      .attr("fill",           "none")
+      .attr("stroke",         (d) => d.color)
+      .attr("stroke-width",   3)
+      .attr("stroke-linecap", "round")
+      .attr("d", (d) => {
+        const pct = (d.projData?.progress || 0) / 100;
+        if (pct <= 0) return "";
+        const r2  = d.r - 5;
+        const s   = -Math.PI / 2;
+        const end = s + pct * 2 * Math.PI;
+        const large = pct > 0.5 ? 1 : 0;
+        return `M ${Math.cos(s)*r2} ${Math.sin(s)*r2} A ${r2} ${r2} 0 ${large} 1 ${Math.cos(end)*r2} ${Math.sin(end)*r2}`;
+      });
+
+    // Avatar emoji for human / agent
+    nodeG.filter((d) => d.type === "human" || d.type === "agent")
+      .append("text")
+      .attr("text-anchor",        "middle")
+      .attr("dominant-baseline",  "central")
+      .attr("font-size",          (d) => d.type === "human" ? 14 : 10)
+      .attr("pointer-events",     "none")
+      .text((d) => d.type === "human" ? d.avatar : "🤖");
+
+    // Main label
+    nodeG.append("text")
+      .attr("text-anchor",    "middle")
+      .attr("dy",             (d) => d.r + 13)
+      .attr("font-size",      (d) => d.type === "proj" ? 11 : d.type === "human" ? 10 : d.type === "task" ? 9 : 8)
+      .attr("font-weight",    (d) => (d.type === "proj" || d.type === "human") ? "600" : "400")
+      .attr("fill",           (d) => d.type === "task" ? "#475569" : d.type === "agent" ? "#7c3aed" : "#1e293b")
+      .attr("font-family",    "system-ui, -apple-system, sans-serif")
+      .attr("pointer-events", "none")
+      .text((d) => d.label.length > 14 ? d.label.slice(0, 13) + "…" : d.label);
+
+    // Dept badge under project label
+    nodeG.filter((d) => d.type === "proj")
+      .append("text")
+      .attr("text-anchor",    "middle")
+      .attr("dy",             (d) => d.r + 24)
+      .attr("font-size",      8)
+      .attr("fill",           (d) => d.deptColor)
+      .attr("font-family",    "system-ui, -apple-system, sans-serif")
+      .attr("pointer-events", "none")
+      .text((d) => d.dept);
+
+    // Job title under human label
+    nodeG.filter((d) => d.type === "human")
+      .append("text")
+      .attr("text-anchor",    "middle")
+      .attr("dy",             (d) => d.r + 24)
+      .attr("font-size",      8)
+      .attr("fill",           "#94a3b8")
+      .attr("font-family",    "system-ui, -apple-system, sans-serif")
+      .attr("pointer-events", "none")
+      .text((d) => d.humanData?.title || "");
+
+    // Tick
+    sim.on("tick", () => {
+      linkSel
+        .attr("x1", (d) => d.source.x)
+        .attr("y1", (d) => d.source.y)
+        .attr("x2", (d) => d.target.x)
+        .attr("y2", (d) => d.target.y);
+      nodeG.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
+    });
+
+    // Resize
+    const ro = new ResizeObserver(() => {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      svg.attr("width", w).attr("height", h);
+      sim.force("center", d3.forceCenter(w / 2, h / 2))
+         .force("x", d3.forceX(w / 2).strength(0.03))
+         .force("y", d3.forceY(h / 2).strength(0.03))
+         .alpha(0.3).restart();
+    });
+    ro.observe(container);
+
+    return () => { sim.stop(); ro.disconnect(); svg.selectAll("*").remove(); };
+  }, []);
 
   return (
-    <div style={{ position: "relative", background: "#000810", borderBottom: "1px solid " + BR, flexShrink: 0 }}>
-      {["tl", "tr", "bl", "br"].map((c) => (
-        <div key={c} style={{ position: "absolute", [c[0] === "t" ? "top" : "bottom"]: 0, [c[1] === "l" ? "left" : "right"]: 0, width: 14, height: 14, borderTop: c[0] === "t" ? "1px solid #00d4ff44" : 0, borderBottom: c[0] === "b" ? "1px solid #00d4ff44" : 0, borderLeft: c[1] === "l" ? "1px solid #00d4ff44" : 0, borderRight: c[1] === "r" ? "1px solid #00d4ff44" : 0 }} />
-      ))}
-      <div style={{ position: "absolute", top: 7, left: 12, fontSize: 9, color: "#00d4ff55", fontFamily: "monospace", letterSpacing: 2, zIndex: 2, pointerEvents: "none" }}>ONTOLOGY·GRAPH // 큰 원 클릭 → 업무 펼치기</div>
-      <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,8,20,.1) 3px,rgba(0,8,20,.1) 4px)", pointerEvents: "none", zIndex: 1 }} />
-      <svg ref={svgRef} width="100%" height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
-        <defs>
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="3" result="b" />
-            <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-          </filter>
-        </defs>
-        {Array.from({ length: 9 },  (_, i) => <line key={"h" + i} x1={0}   y1={i * 32} x2={W}   y2={i * 32} stroke="#001122" strokeWidth={0.5} />)}
-        {Array.from({ length: 23 }, (_, i) => <line key={"v" + i} x1={i * 32} y1={0}   x2={i * 32} y2={H}   stroke="#001122" strokeWidth={0.5} />)}
-        {links.map((l, i) => {
-          const sid = typeof l.source === "string" ? l.source : l.source.id;
-          const tid = typeof l.target === "string" ? l.target : l.target.id;
-          const s = positions[sid], t = positions[tid];
-          if (!s || !t) return null;
-          return <line key={i} x1={s.x} y1={s.y} x2={t.x} y2={t.y} stroke={l.c} strokeOpacity={0.45} strokeWidth={1.5} strokeDasharray="5 3" />;
-        })}
-        {nodes.map((node) => {
-          const pos = positions[node.id];
-          if (!pos) return null;
-          const isExp = expanded[node.id];
-          return (
-            <g key={node.id} transform={`translate(${pos.x},${pos.y})`} onClick={() => clickNode(node)} style={{ cursor: "pointer" }}>
-              {isExp && <circle r={node.r + 9} fill="none" stroke={node.color} strokeWidth={1} strokeOpacity={0.25} strokeDasharray="3 3" />}
-              <circle r={node.r} fill={node.color + "18"} stroke={node.color} strokeWidth={node.type === "proj" ? 2 : 1.5} filter="url(#glow)" />
-              <text y={node.type === "proj" ? -1 : 1} textAnchor="middle" fill={node.color} fontSize={node.type === "proj" ? 9 : 8} fontWeight="700" fontFamily="monospace" style={{ pointerEvents: "none" }}>{node.label}</text>
-              {node.sub && <text y={12} textAnchor="middle" fill="#336688" fontSize={7} fontFamily="monospace" style={{ pointerEvents: "none" }}>{node.sub}</text>}
-              {node.type === "proj" && <text y={node.r + 12} textAnchor="middle" fill="#004466" fontSize={7} fontFamily="monospace" style={{ pointerEvents: "none" }}>{isExp ? "▲ 닫기" : "▼ 열기"}</text>}
-            </g>
-          );
-        })}
-      </svg>
+    <div ref={containerRef} style={{ width: "100%", height: "100%", background: "#f8fafc", position: "relative", overflow: "hidden" }}>
+      <svg ref={svgRef} style={{ width: "100%", height: "100%" }} />
+
+      {/* Legend */}
+      <div style={{ position: "absolute", top: 10, right: 12, background: "white", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", gap: 5 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, color: "#64748b", marginBottom: 2, textTransform: "uppercase", letterSpacing: 1 }}>범례</div>
+        {[
+          { color: "#f59e0b", label: "프로젝트 (마케팅)" },
+          { color: "#38bdf8", label: "프로젝트 (콘텐츠)" },
+          { color: "#f472b6", label: "프로젝트 (디자인)" },
+          { color: "#22c55e", label: "업무 완료" },
+          { color: "#d97706", label: "업무 진행중" },
+          { color: "#94a3b8", label: "업무 대기" },
+          { color: "#1e293b", label: "팀원" },
+          { color: "#8b5cf6", label: "AI 에이전트" },
+        ].map(({ color, label }) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+            <span style={{ fontSize: 9, color: "#64748b", fontFamily: "system-ui, sans-serif" }}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Hint */}
+      <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 9, color: "#94a3b8", fontFamily: "system-ui, sans-serif" }}>
+        스크롤: 줌 · 드래그: 이동 · 클릭: 상세보기
+      </div>
     </div>
   );
 }

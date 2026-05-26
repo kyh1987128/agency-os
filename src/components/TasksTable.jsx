@@ -92,7 +92,7 @@ export default function TasksTable({ onTaskClick }) {
         <div style={{ display: "flex", gap: 4 }}>
           {[["all", "전체"], ["active", "진행중"], ["todo", "대기"], ["done", "완료"]].map(([v, l]) => (
             <button key={v} onClick={() => setStatusFilter(v)}
-              style={{ padding: "4px 10px", borderRadius: 12, border: "1px solid " + (statusFilter === v ? "#818cf8" : BR), background: statusFilter === v ? "#818cf818" : "transparent", color: statusFilter === v ? "#818cf8" : M, fontSize: 10, cursor: "pointer" }}>
+              style={{ padding: "4px 10px", borderRadius: 12, border: "1px solid " + (statusFilter === v ? "#6366f1" : "#e2e8f0"), background: statusFilter === v ? "#6366f118" : "transparent", color: statusFilter === v ? "#6366f1" : M, fontSize: 10, cursor: "pointer" }}>
               {l}
             </button>
           ))}
@@ -100,7 +100,7 @@ export default function TasksTable({ onTaskClick }) {
 
         {/* 부서 필터 */}
         <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}
-          style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid " + BR, background: S, color: T, fontSize: 10, cursor: "pointer" }}>
+          style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#ffffff", color: "#1e293b", fontSize: 10, cursor: "pointer" }}>
           <option value="all">전체 부서</option>
           {DEPTS.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
@@ -139,9 +139,8 @@ export default function TasksTable({ onTaskClick }) {
               return (
                 <tr key={row.key}
                   onClick={() => onTaskClick({ type: "task", proj: row.rawProj, task: row.rawTask, human: row.rawHuman })}
-                  style={{ cursor: "pointer" }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = "#16162a"}
-                  onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                  className="row-hover"
+                  style={{ cursor: "pointer" }}>
                   <td style={{ ...tdStyle, maxWidth: 180 }}>
                     <span style={{ fontSize: 11, color: row.deptColor }}>{row.projTitle}</span>
                   </td>
@@ -158,7 +157,7 @@ export default function TasksTable({ onTaskClick }) {
                   </td>
                   <td style={{ ...tdStyle, minWidth: 90 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ flex: 1, height: 4, background: "#1e1e30", borderRadius: 2 }}>
+                      <div style={{ flex: 1, height: 4, background: "#e2e8f0", borderRadius: 2 }}>
                         <div style={{ height: 4, width: row.progress + "%", background: row.deptColor, borderRadius: 2 }} />
                       </div>
                       <span style={{ fontSize: 10, color: M, minWidth: 28 }}>{row.progress}%</span>

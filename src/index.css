@@ -1,31 +1,29 @@
-:root {
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-html, body, #root {
-  height: 100%;
-  overflow: hidden;
-}
-
-body {
-  background: #0d0d16;
-  color: #e2e8f0;
-  font-family: system-ui, -apple-system, sans-serif;
-}
-
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; overflow: hidden; }
+body { background: #f1f5f9; color: #1e293b; font-family: system-ui, -apple-system, sans-serif; }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #1e1e30; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #2a2a40; }
-
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 button { font-family: inherit; }
 select { font-family: inherit; outline: none; }
+
+/* hover utility classes */
+.row-hover { transition: background 0.12s; }
+.row-hover:hover { background: #f1f5f9 !important; }
+
+.card-hover { transition: background 0.12s; }
+.card-hover:hover { background: #f1f5f9 !important; }
+
+.panel-item-hover { transition: background 0.12s; }
+.panel-item-hover:hover { background: #f1f5f9 !important; }
+
+/* Chat */
+@keyframes typing {
+  0%, 100% { opacity: 0.3; transform: translateY(0); }
+  50%       { opacity: 1;   transform: translateY(-4px); }
+}
+.chat-channel-hover { transition: background 0.12s; }
+.chat-channel-hover:hover { background: #2d2d3f !important; }
+.msg-hover { transition: background 0.1s; }
+.msg-hover:hover { background: #f1f5f9; }
