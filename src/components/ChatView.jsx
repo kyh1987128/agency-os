@@ -346,9 +346,12 @@ export default function ChatView({ activeProject = "default" }) {
               {uploading && <span style={{ fontSize: 11, color: "#94a3b8" }}>⏳ 업로드 중...</span>}
             </div>
           )}
-          <input ref={fileInputRef} type="file" onChange={handleFilePick} style={{ display: "none" }} accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.xls,.png,.jpg,.jpeg" />
           <div style={{ display: "flex", gap: 6 }}>
-            <button title="파일 첨부 (공고문·양식 등)" onClick={() => fileInputRef.current?.click()} disabled={uploading} style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px", fontSize: 13, cursor: uploading ? "default" : "pointer" }}>📎</button>
+            {/* label로 감싸면 input을 네이티브로 트리거 → 모든 브라우저에서 확실히 동작 */}
+            <label title="파일 첨부 (공고문·양식 등)" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px", fontSize: 13, cursor: uploading ? "default" : "pointer", flexShrink: 0 }}>
+              {uploading ? "⏳" : "📎"}
+              <input ref={fileInputRef} type="file" onChange={handleFilePick} disabled={uploading} style={{ display: "none" }} accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.xls,.png,.jpg,.jpeg" />
+            </label>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -383,42 +386,43 @@ export default function ChatView({ activeProject = "default" }) {
         <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
           {/* 📦 결과물 */}
           {cockpitTab === "result" && (
-            artifact ? (
-              <>
-                <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
-                  <div style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>봇 마지막 산출물</div>
+            <>
+              <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+                <div style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>봇 마지막 산출물</div>
+                {artifact ? (
                   <div style={{ border: "1px solid #eef2ff", background: "#fbfcff", borderRadius: 10, padding: "12px 14px", fontSize: 12.5, color: "#1e293b" }}>
                     <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={md}>{artifact}</ReactMarkdown>
                   </div>
-                </div>
-                {/* 액션 */}
-                <div style={{ borderTop: "1px solid #f1f5f9", padding: "10px 12px", flexShrink: 0, background: "#fff" }}>
-                  {savedFlash && <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginBottom: 7, textAlign: "center" }}>{savedFlash}</div>}
-                  <div style={{ fontSize: 9, color: "#94a3b8", marginBottom: 6 }}>다음 액션</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
-                    {[["📋 복사", copyArtifact], [".docx", exportDoc], [".md", exportMd]].map(([l, fn]) => (
-                      <button key={l} onClick={fn} style={cockBtn}>{l}</button>
-                    ))}
+                ) : (
+                  <div style={{ border: "1px dashed #e2e8f0", borderRadius: 10, padding: "24px 14px", textAlign: "center", color: "#94a3b8", fontSize: 12, lineHeight: 1.7 }}>
+                    <div style={{ fontSize: 28, marginBottom: 6 }}>📦</div>
+                    봇이 답하면 결과물이 여기에 정리됩니다.<br />
+                    <span style={{ fontSize: 11, color: "#cbd5e1" }}>아래 버튼으로 복사·내보내기·칸반 저장</span>
                   </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
-                    {[["✂ 더 짧게", "다음 내용을 핵심만 더 짧게 정리해줘", "✂ 위 결과물을 더 짧게 정리"],
-                      ["📊 표로", "다음 내용을 표로 정리해줘", "📊 위 결과물을 표로 정리"],
-                      ["♻ 재작성", "다음 내용을 더 완성도 높게 다시 작성해줘", "♻ 위 결과물 재작성"]].map(([l, instr, label]) => (
-                      <button key={l} disabled={isTyping} onClick={() => sendMessage(`${instr}:\n\n${artifact}`, label)} style={{ ...cockBtn, opacity: isTyping ? 0.5 : 1 }}>{l}</button>
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", gap: 5 }}>
-                    <button onClick={saveToKanban} style={{ ...cockBtn, flex: 1, background: "#eef2ff", color: "#4338ca", borderColor: "#c7d2fe" }}>📌 칸반 카드로</button>
-                    <button onClick={saveToTodo} style={{ ...cockBtn, flex: 1, background: "#f0fdf4", color: "#16a34a", borderColor: "#bbf7d0" }}>✅ 할 일로</button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div style={cockEmpty}>
-                <div style={{ fontSize: 30, marginBottom: 8 }}>📦</div>
-                봇이 답하면 결과물이<br />여기에 정리됩니다.
+                )}
               </div>
-            )
+              {/* 액션 (항상 표시, 결과물 없으면 비활성) */}
+              <div style={{ borderTop: "1px solid #f1f5f9", padding: "10px 12px", flexShrink: 0, background: "#fff" }}>
+                {savedFlash && <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginBottom: 7, textAlign: "center" }}>{savedFlash}</div>}
+                <div style={{ fontSize: 9, color: "#94a3b8", marginBottom: 6 }}>다음 액션 {!artifact && "(봇 답변 후 활성화)"}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
+                  {[["📋 복사", copyArtifact], [".docx", exportDoc], [".md", exportMd]].map(([l, fn]) => (
+                    <button key={l} disabled={!artifact} onClick={fn} style={cock(!artifact)}>{l}</button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
+                  {[["✂ 더 짧게", "다음 내용을 핵심만 더 짧게 정리해줘", "✂ 위 결과물을 더 짧게 정리"],
+                    ["📊 표로", "다음 내용을 표로 정리해줘", "📊 위 결과물을 표로 정리"],
+                    ["♻ 재작성", "다음 내용을 더 완성도 높게 다시 작성해줘", "♻ 위 결과물 재작성"]].map(([l, instr, label]) => (
+                    <button key={l} disabled={isTyping || !artifact} onClick={() => sendMessage(`${instr}:\n\n${artifact}`, label)} style={cock(isTyping || !artifact)}>{l}</button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 5 }}>
+                  <button disabled={!artifact} onClick={saveToKanban} style={{ ...cock(!artifact), flex: 1, background: artifact ? "#eef2ff" : "#f8fafc", color: artifact ? "#4338ca" : "#94a3b8", borderColor: "#c7d2fe" }}>📌 칸반 카드로</button>
+                  <button disabled={!artifact} onClick={saveToTodo} style={{ ...cock(!artifact), flex: 1, background: artifact ? "#f0fdf4" : "#f8fafc", color: artifact ? "#16a34a" : "#94a3b8", borderColor: "#bbf7d0" }}>✅ 할 일로</button>
+                </div>
+              </div>
+            </>
           )}
 
           {/* 📎 근거 (다음 단계) */}
@@ -448,4 +452,5 @@ export default function ChatView({ activeProject = "default" }) {
 
 // 코크핏 버튼/빈상태 공용 스타일
 const cockBtn = { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 9px", fontSize: 11, color: "#475569", cursor: "pointer", fontWeight: 600 };
+const cock = (disabled) => ({ ...cockBtn, opacity: disabled ? 0.45 : 1, cursor: disabled ? "default" : "pointer" });
 const cockEmpty = { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#94a3b8", fontSize: 12, lineHeight: 1.7, padding: 20 };
