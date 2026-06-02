@@ -1,6 +1,7 @@
 import "gantt-task-react/dist/index.css";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { Gantt, ViewMode } from "gantt-task-react";
+import NodeComments from "./NodeComments";
 
 const selectStyle = {
   fontSize: 11,
@@ -850,7 +851,10 @@ export default function GanttView({
               background: "#fff",
               borderRadius: 12,
               padding: 20,
-              minWidth: 360,
+              width: 760,
+              maxWidth: "94vw",
+              maxHeight: "88vh",
+              overflowY: "auto",
               boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
             }}
             onClick={(e) => e.stopPropagation()}
@@ -865,6 +869,10 @@ export default function GanttView({
             >
               {dateModal.task.name}
             </div>
+
+            {/* 본문: 좌(정보) / 우(댓글) 2분할 — 좁은 화면에선 자동 줄바꿈 */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "stretch" }}>
+              <div style={{ flex: "1 1 320px", minWidth: 0 }}>
 
             {/* 날짜 필드 */}
             <div
@@ -1017,6 +1025,18 @@ export default function GanttView({
                 })}
               </div>
             </div>
+
+            </div>{/* 좌측 컬럼 끝 */}
+
+              {/* 우측: 댓글 */}
+              <div style={{ flex: "1 1 280px", minWidth: 0, borderLeft: "1px solid #f1f5f9", paddingLeft: 16 }}>
+                <div style={{ fontSize: 10, color: "#64748b", marginBottom: 4, fontWeight: 700 }}>댓글</div>
+                <NodeComments
+                  pid={allNodes.find((n) => n.id === dateModal.task.id)?.projectId}
+                  nodeId={dateModal.task.id}
+                />
+              </div>
+            </div>{/* 2분할 행 끝 */}
 
             {/* 버튼 */}
             <div style={{ display: "flex", gap: 8 }}>

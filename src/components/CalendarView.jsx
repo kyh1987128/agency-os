@@ -3,6 +3,7 @@ import { Calendar, dateFnsLocalizer } from "react-big-calendar";
 import { format, parse, startOfWeek, getDay } from "date-fns";
 import { ko } from "date-fns/locale";
 import "react-big-calendar/lib/css/react-big-calendar.css";
+import NodeComments from "./NodeComments";
 
 const API = "";
 
@@ -205,7 +206,7 @@ function EventModal({ event, onClose, onSave, onDelete, projData, humans, depart
   return (
     <div style={{ position:"fixed", inset:0, background:"#00000055", zIndex:400, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"5vh 16px 40px", overflowY:"auto" }}
       onClick={e => { if (e.target===e.currentTarget) onClose(); }}>
-      <div style={{ background:"#fff", borderRadius:12, width:440, maxWidth:"94vw", boxShadow:"0 8px 32px rgba(0,0,0,0.18)", flexShrink:0 }}>
+      <div style={{ background:"#fff", borderRadius:12, width:760, maxWidth:"94vw", boxShadow:"0 8px 32px rgba(0,0,0,0.18)", flexShrink:0 }}>
         {/* 헤더 */}
         <div style={{ padding:"12px 16px", borderBottom:"1px solid #e2e8f0", display:"flex", alignItems:"center", gap:10, position:"sticky", top:0, background:"#fff", zIndex:1, borderRadius:"12px 12px 0 0" }}>
           <div style={{ width:8, height:8, borderRadius:"50%", background:statusColor, flexShrink:0 }} />
@@ -214,7 +215,8 @@ function EventModal({ event, onClose, onSave, onDelete, projData, humans, depart
           <button onClick={onClose} style={{ background:"transparent", border:"1px solid #e2e8f0", color:"#94a3b8", cursor:"pointer", borderRadius:6, padding:"2px 10px", fontSize:11 }}>✕</button>
         </div>
 
-        <div style={{ padding:"14px 16px", display:"flex", flexDirection:"column", gap:12 }}>
+        <div style={{ padding:"14px 16px", display:"flex", flexWrap:"wrap", gap:16, alignItems:"stretch" }}>
+          <div style={{ flex:"1 1 320px", minWidth:0, display:"flex", flexDirection:"column", gap:12 }}>
           {proj && (
             <div style={{ fontSize:11, color:"#6366f1", background:"#ede9fe", padding:"4px 10px", borderRadius:8, display:"inline-flex", alignSelf:"flex-start" }}>
               📋 {proj.title}
@@ -299,6 +301,14 @@ function EventModal({ event, onClose, onSave, onDelete, projData, humans, depart
                 </div>
               )}
             </div>
+          </div>
+
+          </div>{/* 좌측 컬럼 끝 */}
+
+          {/* 우측: 댓글 */}
+          <div style={{ flex:"1 1 280px", minWidth:0, borderLeft:"1px solid #f1f5f9", paddingLeft:16, display:"flex", flexDirection:"column" }}>
+            <div style={L}>댓글</div>
+            <NodeComments pid={node.projectId} nodeId={node.id} />
           </div>
         </div>
 
