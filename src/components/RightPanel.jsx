@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { HUMANS } from "../data/humans";
 import { AI_AGENTS } from "../data/agents";
 import { DEPTS, PROJS, COLORS, getDept, STATUS } from "../data/mockData";
@@ -6,10 +6,43 @@ import PixelAvatar from "./PixelAvatar";
 
 const { bg: B, surface: S, border: BR, text: T, muted: M } = COLORS;
 
-export default function RightPanel({ onSelect }) {
+// 실제 Dify 봇 (채팅의 BOTS와 동일)
+const BOTS = [
+  { id: "director", name: "기획 디렉터",   icon: "🎯", color: "#6366f1" },
+  { id: "saup",     name: "사업계획서 봇",  icon: "📑", color: "#f59e0b" },
+  { id: "jiwon",    name: "지원사업 봇",    icon: "🏛️", color: "#10b981" },
+  { id: "service",  name: "서비스소개서 봇", icon: "📄", color: "#38bdf8" },
+  { id: "cs",       name: "CS 문구 봇",     icon: "💬", color: "#f472b6" },
+  { id: "meeting",  name: "회의록 봇",      icon: "🗒️", color: "#a78bfa" },
+  { id: "qa",       name: "사내 Q&A 봇",   icon: "❓", color: "#94a3b8" },
+  { id: "research", name: "리서치 봇",      icon: "🔍", color: "#0ea5e9" },
+  { id: "review",   name: "검토·감수 봇",   icon: "✅", color: "#22c55e" },
+  { id: "ppt",      name: "발표자료 PPT 봇", icon: "📊", color: "#fb923c" },
+];
+
+export default function RightPanel({ onSelect, activeProject = "default" }) {
   const [view,       setView]       = useState("list");
   const [selItem,    setSelItem]    = useState(null);
   const [deptFilter, setDeptFilter] = useState("all");
+  const [activity,   setActivity]   = useState({});
+
+  // 각 봇의 실제 최근 대화 조회
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => Promise.all(BOTS.map((b) =>
+      fetch(`/api/projects/${activeProject}/messages/${b.id}`)
+        .then((r) => r.json())
+        .then((arr) => {
+          const list = Array.isArray(arr) ? arr : [];
+          const last = list[list.length - 1];
+          return [b.id, last ? { text: (last.content || "").replace(/\n/g, " ").slice(0, 36), time: last.timestamp, count: list.length } : null];
+        })
+        .catch(() => [b.id, null])
+    )).then((entries) => { if (!cancelled) setActivity(Object.fromEntries(entries)); });
+    load();
+    const t = setInterval(load, 8000); // 8초마다 갱신
+    return () => { cancelled = true; clearInterval(t); };
+  }, [activeProject]);
 
   const selectHuman = (h)  => { setSelItem({ type: "human", ...h  }); setView("human-detail"); onSelect({ type: "human", id: h.id  }); };
   const selectAI    = (ai) => { setSelItem({ type: "ai",    ...ai }); setView("ai-detail");    onSelect({ type: "ai",   id: ai.id }); };
@@ -49,45 +82,28 @@ export default function RightPanel({ onSelect }) {
             </div>
           ))}
 
-          {/* AI 에이전트 */}
+          {/* AI 봇 (실제 Dify 봇 + 최근 활동) */}
           <div style={{ padding: "7px 10px 4px", fontSize: 10, fontWeight: 700, color: M, background: B, borderBottom: "1px solid " + BR, position: "sticky", top: 0, zIndex: 2 }}>
-            🤖 AI 에이전트 ({AI_AGENTS.length})
+            🤖 AI 봇 ({BOTS.length}) <span style={{ fontWeight: 400, fontSize: 9 }}>· Gemini · Dify</span>
           </div>
-          {/* 부서 필터 */}
-          <div style={{ padding: "6px 8px", borderBottom: "1px solid " + BR, display: "flex", gap: 4, flexWrap: "wrap" }}>
-            <button onClick={() => setDeptFilter("all")}
-              style={{ padding: "3px 8px", borderRadius: 8, border: "1px solid " + (deptFilter === "all" ? "#818cf8" : BR), background: deptFilter === "all" ? "#818cf815" : "transparent", color: deptFilter === "all" ? "#818cf8" : M, fontSize: 9, cursor: "pointer" }}>
-              전체
-            </button>
-            {DEPTS.map((d) => (
-              <button key={d.id} onClick={() => setDeptFilter(d.id)}
-                style={{ padding: "3px 8px", borderRadius: 8, border: "1px solid " + (deptFilter === d.id ? d.color : BR), background: deptFilter === d.id ? d.color + "15" : "transparent", color: deptFilter === d.id ? d.color : M, fontSize: 9, cursor: "pointer" }}>
-                {d.name}
-              </button>
-            ))}
-          </div>
-
-          {/* 부서별 그룹 */}
-          {(deptFilter === "all" ? DEPTS : DEPTS.filter((d) => d.id === deptFilter)).map((dept) => {
-            const deptAIs = AI_AGENTS.filter((a) => a.dept === dept.id);
-            if (!deptAIs.length) return null;
+          {BOTS.map((b) => {
+            const act = activity[b.id];
+            const on = act && act.count > 0;
             return (
-              <div key={dept.id}>
-                <div style={{ padding: "5px 10px 3px", fontSize: 9, color: dept.color, fontWeight: 700, background: dept.color + "08", borderBottom: "1px solid " + dept.color + "18", fontFamily: "monospace", letterSpacing: 1 }}>{dept.name}팀</div>
-                {deptAIs.map((ai) => (
-                  <div key={ai.id} onClick={() => selectAI(ai)}
-                    className="panel-item-hover"
-                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", cursor: "pointer", borderBottom: "1px solid " + BR + "33" }}>
-                    <div style={{ position: "relative", flexShrink: 0 }}>
-                      <PixelAvatar id={ai.id} size={30} color={ai.color} />
-                      <div style={{ position: "absolute", bottom: -1, right: -1, width: 7, height: 7, borderRadius: "50%", background: ai.status === "active" ? "#16a34a" : "#475569", border: "1.5px solid #ffffff" }} />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: ai.color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ai.name}</div>
-                      <div style={{ fontSize: 9, color: M, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ai.status === "active" ? "▶ " + ai.task : "대기중"}</div>
-                    </div>
+              <div key={b.id}
+                className="panel-item-hover"
+                style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderBottom: "1px solid " + BR + "33" }}>
+                <div style={{ position: "relative", flexShrink: 0, width: 30, height: 30, borderRadius: 9, background: b.color + "20", border: "1px solid " + b.color + "33", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>
+                  {b.icon}
+                  <div style={{ position: "absolute", bottom: -2, right: -2, width: 8, height: 8, borderRadius: "50%", background: on ? "#16a34a" : "#cbd5e1", border: "1.5px solid #fff" }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: b.color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</div>
+                  <div style={{ fontSize: 9, color: M, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {on ? `▶ ${act.text}…` : "대기중"}
                   </div>
-                ))}
+                </div>
+                {on && <span style={{ fontSize: 8, color: M, background: B, padding: "1px 5px", borderRadius: 7, flexShrink: 0 }}>{act.count}</span>}
               </div>
             );
           })}

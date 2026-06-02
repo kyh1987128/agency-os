@@ -9,6 +9,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import NodeComments from "./NodeComments";
+import TodoPanel from "./TodoPanel";
 
 const API = "";
 
@@ -167,7 +168,9 @@ function DroppableColumn({ colId, children }) {
   return (
     <div ref={setNodeRef} style={{
       flex: 1,
-      minHeight: 200,
+      minHeight: 0,
+      display: "flex",
+      flexDirection: "column",
       background: isOver ? "#f0f9ff" : "transparent",
       borderRadius: 8,
       transition: "background 0.15s",
@@ -433,7 +436,29 @@ export default function KanbanView({
   const [editingCard,     setEditingCard]     = useState(null);
   const [cards,           setCards]           = useState([]);
   const [activeCard,      setActiveCard]      = useState(null);
+  const [splitPct,        setSplitPct]        = useState(58); // 칸반:투두 비율 (보드 %)
   const dragOriginStatus = useRef(null); // 드래그 시작 시 원래 status 저장
+  const resizeRef = useRef(null);
+
+  // 칸반/투두 비율 드래그 조절
+  const startResize = (e) => {
+    e.preventDefault();
+    const area = resizeRef.current;
+    if (!area) return;
+    const rect = area.getBoundingClientRect();
+    const onMove = (ev) => {
+      const pct = ((ev.clientY - rect.top) / rect.height) * 100;
+      setSplitPct(Math.max(20, Math.min(85, pct)));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+    };
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -689,8 +714,11 @@ export default function KanbanView({
           </span>
         </div>
 
-        {/* ── 콘텐츠 영역 ── */}
-        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        {/* ── 리사이즈 영역 (보드 + 투두, 드래그로 비율 조절) ── */}
+        <div ref={resizeRef} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+
+        {/* ── 콘텐츠 영역 (보드) ── */}
+        <div style={{ flex: splitPct, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
           {/* ── 일반 보드 모드 ── */}
           {!groupBy && (
@@ -935,6 +963,24 @@ export default function KanbanView({
             </div>
           )}
         </div>
+
+        {/* ── 드래그 비율조절 바 ── */}
+        <div
+          onMouseDown={startResize}
+          title="드래그하여 칸반/할일 비율 조절"
+          style={{ height: 8, flexShrink: 0, cursor: "row-resize", background: "#e2e8f0", display: "flex", alignItems: "center", justifyContent: "center" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "#cbd5e1")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "#e2e8f0")}
+        >
+          <div style={{ width: 44, height: 3, borderRadius: 2, background: "#94a3b8" }} />
+        </div>
+
+        {/* 담당자별 할 일 메모 패널 (하단) */}
+        <div style={{ flex: 100 - splitPct, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <TodoPanel humans={humans} />
+        </div>
+
+        </div>{/* 리사이즈 영역 끝 */}
       </div>
     </>
   );

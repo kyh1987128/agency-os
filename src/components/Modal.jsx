@@ -1,6 +1,10 @@
-import { PROJS, COLORS, getDept, STATUS, TASK_STATUS_COLOR } from "../data/mockData";
+import { useState, useEffect, useRef } from "react";
+import { COLORS, getDept, STATUS, TASK_STATUS_COLOR } from "../data/mockData";
 import { HUMANS, getHuman } from "../data/humans";
 import { AI_AGENTS } from "../data/agents";
+import NodeComments from "./NodeComments";
+
+const API = "";
 
 const { bg: B, surface: S, border: BR, text: T, muted: M } = COLORS;
 
@@ -22,9 +26,9 @@ function StatBar({ label, value, color }) {
 }
 
 // Human detail panel
-function HumanDetail({ human, onClose }) {
+function HumanDetail({ human, onClose, projData = [] }) {
   const dept = getDept(human.dept);
-  const myTasks = PROJS.flatMap((p) =>
+  const myTasks = projData.flatMap((p) =>
     p.tasks
       .map((t, i) => ({ ...t, proj: p, idx: i }))
       .filter((t) => t.a === human.id)
@@ -99,11 +103,70 @@ function HumanDetail({ human, onClose }) {
 }
 
 // Project detail panel
-function ProjectDetail({ proj }) {
+function ProjectDetail({ proj, projectId = "default" }) {
   const d = getDept(proj.dept);
   const s = STATUS[proj.status];
+  const [tab, setTab]       = useState("tasks");
+  const [notes, setNotes]   = useState([]);
+  const [input, setInput]   = useState("");
+  const [files, setFiles]   = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef();
+
+  useEffect(() => {
+    if (tab === "notes") {
+      fetch(`${API}/api/projects/${projectId}/notes`)
+        .then(r => r.json()).then(data => setNotes(Array.isArray(data) ? data : [])).catch(() => {});
+    }
+  }, [tab, projectId]);
+
+  const handleFileChange = async (e) => {
+    const picked = Array.from(e.target.files);
+    if (!picked.length) return;
+    setUploading(true);
+    const uploaded = [];
+    for (const f of picked) {
+      const fd = new FormData();
+      fd.append("file", f);
+      try {
+        const res = await fetch(`${API}/api/upload`, { method: "POST", body: fd });
+        const data = await res.json();
+        if (data.ok) uploaded.push({ name: data.name, url: data.url, size: data.size, mime: data.mime });
+      } catch {}
+    }
+    setFiles(prev => [...prev, ...uploaded]);
+    setUploading(false);
+    e.target.value = "";
+  };
+
+  const submitNote = async () => {
+    if (!input.trim() && files.length === 0) return;
+    try {
+      const res = await fetch(`${API}/api/projects/${projectId}/notes`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: input, files }),
+      });
+      const note = await res.json();
+      setNotes(prev => [note, ...prev]);
+      setInput(""); setFiles([]);
+    } catch {}
+  };
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  const deleteNote = async (nid) => {
+    if (confirmDeleteId !== nid) { setConfirmDeleteId(nid); return; }
+    await fetch(`${API}/api/projects/${projectId}/notes/${nid}`, { method: "DELETE" });
+    setNotes(prev => prev.filter(n => n.id !== nid));
+    setConfirmDeleteId(null);
+  };
+
+  const isImage = (mime) => mime?.startsWith("image/");
+  const fmtSize = (b) => b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)}MB` : `${(b / 1024).toFixed(0)}KB`;
+
   return (
     <>
+      {/* 헤더 */}
       <div style={{ marginBottom: 4 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: T, marginBottom: 6 }}>{proj.title}</div>
         <div style={{ display: "flex", gap: 5, marginBottom: 10 }}>
@@ -114,23 +177,123 @@ function ProjectDetail({ proj }) {
       <div style={{ height: 6, background: BR, borderRadius: 3, marginBottom: 4 }}>
         <div style={{ height: 6, width: proj.progress + "%", background: d?.color, borderRadius: 3 }} />
       </div>
-      <div style={{ fontSize: 11, color: d?.color, marginBottom: 10 }}>{proj.progress}% · 마감 {proj.due}</div>
-      <div style={{ fontSize: 11, color: M, lineHeight: 1.6, marginBottom: 14 }}>{proj.desc}</div>
+      <div style={{ fontSize: 11, color: d?.color, marginBottom: 14 }}>{proj.progress}% · 마감 {proj.due}</div>
 
-      <div style={{ fontSize: 10, fontWeight: 700, color: M, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>업무 목록</div>
-      {proj.tasks.map((t, i) => {
-        const hu = getHuman(t.a);
-        const tc = TASK_STATUS_COLOR[t.s];
-        return (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: B, borderRadius: 8, marginBottom: 6, borderLeft: "3px solid " + tc }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12, color: T, fontWeight: 600 }}>{t.t}</div>
-              <div style={{ fontSize: 10, color: M, marginTop: 2 }}>{hu?.avatar} {hu?.name} · 마감 {t.due}</div>
+      {/* 탭 */}
+      <div style={{ display: "flex", gap: 2, borderBottom: "1px solid " + BR, marginBottom: 14 }}>
+        {[["tasks", "📋 업무"], ["notes", "📝 메모"]].map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} style={{
+            padding: "6px 14px", border: "none", background: "transparent", cursor: "pointer",
+            fontSize: 11, fontWeight: 600,
+            color: tab === id ? d?.color : M,
+            borderBottom: tab === id ? `2px solid ${d?.color}` : "2px solid transparent",
+            marginBottom: -1,
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* 업무 탭 */}
+      {tab === "tasks" && (
+        <>
+          <div style={{ fontSize: 11, color: M, lineHeight: 1.6, marginBottom: 14 }}>{proj.desc}</div>
+          {proj.tasks.map((t, i) => {
+            const hu = getHuman(t.a);
+            const tc = TASK_STATUS_COLOR[t.s];
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: B, borderRadius: 8, marginBottom: 6, borderLeft: "3px solid " + tc }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, color: T, fontWeight: 600 }}>{t.t}</div>
+                  <div style={{ fontSize: 10, color: M, marginTop: 2 }}>{hu?.avatar} {hu?.name} · 마감 {t.due}</div>
+                </div>
+                <span style={{ fontSize: 9, color: tc, background: tc + "18", padding: "2px 8px", borderRadius: 6 }}>{STATUS_LABEL[t.s]}</span>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* 메모 탭 */}
+      {tab === "notes" && (
+        <>
+          {/* 입력창 */}
+          <div style={{ border: "1px solid " + BR, borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
+            <textarea
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="메모를 입력하세요..."
+              rows={3}
+              style={{ width: "100%", boxSizing: "border-box", border: "none", padding: "10px 12px", fontSize: 12, color: T, resize: "none", outline: "none", fontFamily: "inherit" }}
+            />
+            {/* 첨부 파일 미리보기 */}
+            {files.length > 0 && (
+              <div style={{ padding: "6px 12px", display: "flex", flexWrap: "wrap", gap: 6, borderTop: "1px solid " + BR }}>
+                {files.map((f, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, background: B, borderRadius: 6, padding: "4px 8px", fontSize: 10, color: M }}>
+                    {isImage(f.mime)
+                      ? <img src={`${API}${f.url}`} alt={f.name} style={{ width: 24, height: 24, objectFit: "cover", borderRadius: 3 }} />
+                      : <span>📎</span>}
+                    <span style={{ maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                    <span style={{ color: "#94a3b8" }}>{fmtSize(f.size)}</span>
+                    <span onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} style={{ cursor: "pointer", color: "#cbd5e1", marginLeft: 2 }}>✕</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderTop: "1px solid " + BR, background: "#fafafa" }}>
+              <input ref={fileRef} type="file" multiple onChange={handleFileChange} style={{ display: "none" }} />
+              <button onClick={() => fileRef.current?.click()} style={{ background: "transparent", border: "1px solid " + BR, borderRadius: 6, padding: "4px 10px", fontSize: 11, color: M, cursor: "pointer" }}>
+                {uploading ? "업로드중..." : "📎 파일"}
+              </button>
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={submitNote}
+                disabled={!input.trim() && files.length === 0}
+                style={{ background: (!input.trim() && files.length === 0) ? BR : d?.color, color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+              >등록</button>
             </div>
-            <span style={{ fontSize: 9, color: tc, background: tc + "18", padding: "2px 8px", borderRadius: 6 }}>{STATUS_LABEL[t.s]}</span>
           </div>
-        );
-      })}
+
+          {/* 노트 목록 */}
+          {notes.length === 0 && (
+            <div style={{ textAlign: "center", color: M, fontSize: 12, padding: "20px 0" }}>아직 메모가 없습니다</div>
+          )}
+          {notes.map(note => (
+            <div key={note.id} style={{ border: "1px solid " + BR, borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 13 }}>👤</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: T }}>{note.author}</span>
+                  <span style={{ fontSize: 10, color: M }}>{new Date(note.createdAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+                {confirmDeleteId === note.id ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ fontSize: 10, color: "#dc2626" }}>삭제할까요?</span>
+                    <span onClick={() => deleteNote(note.id)} style={{ fontSize: 10, color: "#dc2626", fontWeight: 700, cursor: "pointer", padding: "1px 6px", border: "1px solid #fecaca", borderRadius: 4 }}>확인</span>
+                    <span onClick={() => setConfirmDeleteId(null)} style={{ fontSize: 10, color: M, cursor: "pointer", padding: "1px 6px", border: "1px solid " + BR, borderRadius: 4 }}>취소</span>
+                  </div>
+                ) : (
+                  <span onClick={() => deleteNote(note.id)} style={{ fontSize: 10, color: "#cbd5e1", cursor: "pointer" }}>✕</span>
+                )}
+              </div>
+              {note.content && <div style={{ fontSize: 12, color: T, lineHeight: 1.7, whiteSpace: "pre-wrap", marginBottom: note.files?.length ? 8 : 0 }}>{note.content}</div>}
+              {note.files?.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {note.files.map((f, i) => (
+                    isImage(f.mime)
+                      ? <a key={i} href={`${API}${f.url}`} target="_blank" rel="noreferrer">
+                          <img src={`${API}${f.url}`} alt={f.name} style={{ height: 72, borderRadius: 6, objectFit: "cover", border: "1px solid " + BR }} />
+                        </a>
+                      : <a key={i} href={`${API}${f.url}`} target="_blank" rel="noreferrer"
+                          style={{ display: "flex", alignItems: "center", gap: 5, background: B, borderRadius: 6, padding: "5px 10px", fontSize: 11, color: "#6366f1", textDecoration: "none" }}>
+                          📎 {f.name} <span style={{ color: M }}>({fmtSize(f.size)})</span>
+                        </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </>
+      )}
     </>
   );
 }
@@ -139,11 +302,14 @@ function ProjectDetail({ proj }) {
 function TaskDetail({ task, proj, human }) {
   const tc   = TASK_STATUS_COLOR[task.s];
   const dept = proj ? getDept(proj.dept) : null;
+  // nodeId: allNodes 기반(task.id) 또는 구형(task.id)
+  const nodeId = task.id || null;
+  const pid    = proj?.id || null;
   return (
     <>
       <div style={{ padding: "12px 14px", background: tc + "10", borderRadius: 10, border: "1px solid " + tc + "33", marginBottom: 14 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: tc, marginBottom: 4 }}>{task.t}</div>
-        <div style={{ fontSize: 10, color: M }}>마감 {task.due}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: tc, marginBottom: 4 }}>{task.t || task.title}</div>
+        <div style={{ fontSize: 10, color: M }}>마감 {task.due || task.dueDate || "—"}</div>
       </div>
 
       {proj && (
@@ -167,6 +333,14 @@ function TaskDetail({ task, proj, human }) {
             </div>
           </div>
         </>
+      )}
+
+      {/* 댓글 섹션 — nodeId와 pid가 모두 있을 때만 표시 */}
+      {nodeId && pid && (
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: M, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>댓글</div>
+          <NodeComments pid={pid} nodeId={nodeId} />
+        </div>
       )}
     </>
   );
@@ -212,7 +386,7 @@ function AgentDetail({ agentData }) {
 }
 
 // ── Main Modal ────────────────────────────────────────────────────────────────
-export default function Modal({ item, onClose }) {
+export default function Modal({ item, onClose, activeProject = "default", projData = [] }) {
   if (!item) return null;
 
   // Resolve data
@@ -221,7 +395,7 @@ export default function Modal({ item, onClose }) {
     : item.human;
 
   const proj = item.type === "project"
-    ? PROJS.find((p) => p.id === item.id) || item.data
+    ? projData.find((p) => p.id === item.id) || item.data
     : item.proj;
 
   const task     = item.task;
@@ -249,8 +423,8 @@ export default function Modal({ item, onClose }) {
         </div>
 
         <div style={{ padding: "16px 18px" }}>
-          {item.type === "human"   && human    && <HumanDetail   human={human} onClose={onClose} />}
-          {item.type === "project" && proj      && <ProjectDetail proj={proj} />}
+          {item.type === "human"   && human    && <HumanDetail   human={human} onClose={onClose} projData={projData} />}
+          {item.type === "project" && proj      && <ProjectDetail proj={proj} projectId={activeProject} />}
           {item.type === "task"    && task      && <TaskDetail    task={task} proj={proj} human={human} />}
           {item.type === "agent"   && agentData && <AgentDetail   agentData={agentData} />}
         </div>
