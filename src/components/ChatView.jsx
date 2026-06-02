@@ -51,9 +51,10 @@ export default function ChatView({ activeProject = "default" }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [copyDone, setCopyDone] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [cockpitTab, setCockpitTab] = useState("result"); // result | evidence | flow
+  const [savedFlash, setSavedFlash] = useState("");        // 저장/복사 피드백
   const fileInputRef = useRef(null);
   const bottomRef = useRef(null);
   const activeBotRef = useRef(activeBot);
@@ -116,7 +117,7 @@ export default function ChatView({ activeProject = "default" }) {
   };
   const removeFile = (cid) => setAttachedFiles((p) => p.filter((f) => f.cid !== cid));
 
-  const sendMessage = async (text) => {
+  const sendMessage = async (text, displayText) => {
     const txt = (text ?? input).trim();
     if ((!txt && attachedFiles.length === 0) || isTyping) return;
     const filesToSend = attachedFiles.map((f) => ({ type: f.type, transfer_method: f.transfer_method, upload_file_id: f.upload_file_id, name: f.name, text: f.text }));
@@ -126,7 +127,8 @@ export default function ChatView({ activeProject = "default" }) {
     setIsTyping(true);
     const bot = BOT_MAP[activeBot];
     const query = txt || "첨부한 파일을 분석해줘.";
-    const displayContent = txt + (fileNames.length ? `\n📎 ${fileNames.join(", ")}` : "");
+    // displayText: 봇에 보내는 query와 별개로 사용자 말풍선에 보일 짧은 라벨(코크핏 액션용)
+    const displayContent = (displayText ?? txt) + (fileNames.length ? `\n📎 ${fileNames.join(", ")}` : "");
 
     const userMsg = { id: `u_${Date.now()}`, clientId: CLIENT_ID, role: "user", senderName: "나", content: displayContent, timestamp: new Date().toISOString() };
     addMsg(userMsg);
@@ -162,6 +164,68 @@ export default function ChatView({ activeProject = "default" }) {
   };
 
   const cur = BOT_MAP[activeBot];
+
+  // ── 코크핏: 마지막 봇 산출물 ──
+  const lastBotMsg = [...msgs].reverse().find((m) => m.role !== "user" && (m.content || "").trim() && !m.isStreaming);
+  const artifact = lastBotMsg?.content || "";
+  const artifactTitle = (() => {
+    if (!artifact) return "";
+    const first = artifact.split("\n").find((l) => l.trim()) || "";
+    return first.replace(/^#+\s*/, "").replace(/[*_`]/g, "").trim().slice(0, 40) || `${cur.name} 결과`;
+  })();
+
+  const flash = (msg) => { setSavedFlash(msg); setTimeout(() => setSavedFlash(""), 2000); };
+
+  const copyArtifact = () => { navigator.clipboard.writeText(artifact).then(() => flash("복사됨!")); };
+
+  const downloadBlob = (content, filename, mime) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+  const exportMd = () => downloadBlob(artifact, `${artifactTitle || "결과물"}.md`, "text/markdown;charset=utf-8");
+  const exportDoc = () => {
+    // HTML 래핑 → Word가 .doc로 열림 (라이브러리 불필요, 한글 OK)
+    const htmlBody = artifact
+      .split("\n").map((l) => l.trim() ? `<p>${l.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>` : "<br/>").join("");
+    const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'></head><body>${htmlBody}</body></html>`;
+    downloadBlob("﻿" + html, `${artifactTitle || "결과물"}.doc`, "application/msword");
+  };
+
+  const saveToKanban = async () => {
+    if (!artifact) return;
+    try {
+      const r = await fetch(`${API}/api/projects/${activeProject}/kanban/cards`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: artifactTitle || `${cur.name} 결과`,
+          desc: artifact,
+          column: "todo",
+          agentId: cur.id, agentName: cur.name, agentAvatar: cur.icon,
+          projectId: activeProject !== "default" ? activeProject : null,
+        }),
+      });
+      if (r.ok) flash("📌 칸반에 저장됨!"); else flash("저장 실패");
+    } catch { flash("저장 실패"); }
+  };
+
+  const saveToTodo = async () => {
+    if (!artifact) return;
+    try {
+      const r = await fetch(`${API}/api/todos`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ humanId: "unassigned", text: `[${cur.name}] ${artifactTitle}` }),
+      });
+      if (r.ok) flash("✅ 할 일에 추가됨!"); else flash("추가 실패");
+    } catch { flash("추가 실패"); }
+  };
+
+  const copyConversation = () => {
+    const text = msgs.map((m) => `[${m.agentName || m.senderName || "나"}] ${m.content}`).join("\n\n");
+    navigator.clipboard.writeText(text).then(() => flash("대화 복사됨!"));
+  };
 
   return (
     <div style={{ display: "flex", flex: 1, height: "100%", overflow: "hidden", fontFamily: "-apple-system, sans-serif" }}>
@@ -206,6 +270,7 @@ export default function ChatView({ activeProject = "default" }) {
           <span style={{ fontSize: 18 }}>{cur.icon}</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>{cur.name}</span>
           <span style={{ fontSize: 10, color: "#94a3b8" }}>— {cur.desc}</span>
+          <button title="대화 전체 복사" onClick={copyConversation} style={{ marginLeft: "auto", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 7, padding: "5px 10px", fontSize: 11, color: "#475569", cursor: "pointer" }}>📋 대화 복사</button>
         </div>
 
         {/* 메시지 목록 (카카오톡 스타일) */}
@@ -300,36 +365,87 @@ export default function ChatView({ activeProject = "default" }) {
         </div>
       </div>
 
-      {/* ── RIGHT: 봇 정보 ── */}
-      <div style={{ width: 220, flexShrink: 0, background: "#fff", borderLeft: "1px solid #e2e8f0", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <div style={{ padding: "14px 14px 10px", borderBottom: "1px solid #f1f5f9" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>봇 정보</div>
+      {/* ── RIGHT: 코크핏 (결과물 / 근거 / 협업) ── */}
+      <div style={{ width: 320, flexShrink: 0, background: "#fff", borderLeft: "1px solid #e2e8f0", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* 탭 */}
+        <div style={{ display: "flex", borderBottom: "1px solid #e2e8f0", flexShrink: 0 }}>
+          {[["result", "📦 결과물"], ["evidence", "📎 근거"], ["flow", "🔄 협업"]].map(([id, label]) => (
+            <button key={id} onClick={() => setCockpitTab(id)} style={{
+              flex: 1, padding: "11px 4px", border: "none", background: cockpitTab === id ? "#fff" : "#f8fafc",
+              borderBottom: cockpitTab === id ? "2px solid #6366f1" : "2px solid transparent",
+              color: cockpitTab === id ? "#6366f1" : "#94a3b8", fontWeight: cockpitTab === id ? 700 : 500,
+              fontSize: 11.5, cursor: "pointer",
+            }}>{label}</button>
+          ))}
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <span style={{ fontSize: 24 }}>{cur.icon}</span>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>{cur.name}</div>
-              <div style={{ fontSize: 9, color: cur.color, fontWeight: 700 }}>Gemini · Dify</div>
-            </div>
-          </div>
-          <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.6, marginBottom: 14 }}>{cur.desc}</div>
 
-          <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 12 }}>
-            <div style={{ fontSize: 9, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>📤 내보내기</div>
-            <div
-              onClick={() => {
-                const text = msgs.map((m) => `[${m.agentName || m.senderName || "나"}] ${m.content}`).join("\n\n");
-                navigator.clipboard.writeText(text).then(() => { setCopyDone(true); setTimeout(() => setCopyDone(false), 2000); });
-              }}
-              style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 10px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 12, color: copyDone ? "#22c55e" : "#475569", cursor: "pointer", background: copyDone ? "#f0fdf4" : "#fff" }}
-            >
-              <span style={{ fontSize: 14 }}>{copyDone ? "✅" : "📋"}</span>
-              <span>{copyDone ? "복사됨!" : "대화 내용 복사"}</span>
+        {/* 본문 */}
+        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+          {/* 📦 결과물 */}
+          {cockpitTab === "result" && (
+            artifact ? (
+              <>
+                <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+                  <div style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>봇 마지막 산출물</div>
+                  <div style={{ border: "1px solid #eef2ff", background: "#fbfcff", borderRadius: 10, padding: "12px 14px", fontSize: 12.5, color: "#1e293b" }}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={md}>{artifact}</ReactMarkdown>
+                  </div>
+                </div>
+                {/* 액션 */}
+                <div style={{ borderTop: "1px solid #f1f5f9", padding: "10px 12px", flexShrink: 0, background: "#fff" }}>
+                  {savedFlash && <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginBottom: 7, textAlign: "center" }}>{savedFlash}</div>}
+                  <div style={{ fontSize: 9, color: "#94a3b8", marginBottom: 6 }}>다음 액션</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
+                    {[["📋 복사", copyArtifact], [".docx", exportDoc], [".md", exportMd]].map(([l, fn]) => (
+                      <button key={l} onClick={fn} style={cockBtn}>{l}</button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
+                    {[["✂ 더 짧게", "다음 내용을 핵심만 더 짧게 정리해줘", "✂ 위 결과물을 더 짧게 정리"],
+                      ["📊 표로", "다음 내용을 표로 정리해줘", "📊 위 결과물을 표로 정리"],
+                      ["♻ 재작성", "다음 내용을 더 완성도 높게 다시 작성해줘", "♻ 위 결과물 재작성"]].map(([l, instr, label]) => (
+                      <button key={l} disabled={isTyping} onClick={() => sendMessage(`${instr}:\n\n${artifact}`, label)} style={{ ...cockBtn, opacity: isTyping ? 0.5 : 1 }}>{l}</button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 5 }}>
+                    <button onClick={saveToKanban} style={{ ...cockBtn, flex: 1, background: "#eef2ff", color: "#4338ca", borderColor: "#c7d2fe" }}>📌 칸반 카드로</button>
+                    <button onClick={saveToTodo} style={{ ...cockBtn, flex: 1, background: "#f0fdf4", color: "#16a34a", borderColor: "#bbf7d0" }}>✅ 할 일로</button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div style={cockEmpty}>
+                <div style={{ fontSize: 30, marginBottom: 8 }}>📦</div>
+                봇이 답하면 결과물이<br />여기에 정리됩니다.
+              </div>
+            )
+          )}
+
+          {/* 📎 근거 (다음 단계) */}
+          {cockpitTab === "evidence" && (
+            <div style={cockEmpty}>
+              <div style={{ fontSize: 30, marginBottom: 8 }}>📎</div>
+              <b style={{ color: "#64748b" }}>근거·출처</b><br />
+              봇 답변의 웹검색 출처와<br />사내위키 근거를 표시합니다.<br />
+              <span style={{ color: "#cbd5e1" }}>(위키 연결 후 제공)</span>
             </div>
-          </div>
+          )}
+
+          {/* 🔄 협업 (다음 단계) */}
+          {cockpitTab === "flow" && (
+            <div style={cockEmpty}>
+              <div style={{ fontSize: 30, marginBottom: 8 }}>🔄</div>
+              <b style={{ color: "#64748b" }}>봇 협업 흐름</b><br />
+              통합 디렉터가 전문봇들을<br />조율하는 과정을 보여줍니다.<br />
+              <span style={{ color: "#cbd5e1" }}>(다음 단계 제공)</span>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
+
+// 코크핏 버튼/빈상태 공용 스타일
+const cockBtn = { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 9px", fontSize: 11, color: "#475569", cursor: "pointer", fontWeight: 600 };
+const cockEmpty = { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#94a3b8", fontSize: 12, lineHeight: 1.7, padding: 20 };

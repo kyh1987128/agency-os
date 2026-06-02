@@ -800,7 +800,7 @@ app.get("/api/projects/:pid/kanban", (req, res) => {
 // POST /api/projects/:pid/kanban/cards → 카드 추가
 app.post("/api/projects/:pid/kanban/cards", (req, res) => {
   const { pid } = req.params;
-  const { title, agentId, agentName, agentAvatar, column, dept, projectId, dueDate } = req.body;
+  const { title, desc, agentId, agentName, agentAvatar, column, dept, projectId, dueDate } = req.body;
   if (!title) {
     return res.status(400).json({ error: "title is required" });
   }
@@ -808,6 +808,7 @@ app.post("/api/projects/:pid/kanban/cards", (req, res) => {
   const newCard = {
     id: `card_${randomUUID()}`,
     title,
+    desc: desc || "",
     agentId: agentId || null,
     agentName: agentName || null,
     agentAvatar: agentAvatar || null,
@@ -826,7 +827,7 @@ app.post("/api/projects/:pid/kanban/cards", (req, res) => {
 // PATCH /api/projects/:pid/kanban/cards/:cid → 카드 업데이트
 app.patch("/api/projects/:pid/kanban/cards/:cid", (req, res) => {
   const { pid, cid } = req.params;
-  const { column, title, agentId, agentName, agentAvatar, dept, projectId, dueDate } = req.body;
+  const { column, title, desc, agentId, agentName, agentAvatar, dept, projectId, dueDate } = req.body;
   const kanban = loadKanban(pid);
   const card = kanban.cards.find((c) => c.id === cid);
   if (!card) {
@@ -834,6 +835,7 @@ app.patch("/api/projects/:pid/kanban/cards/:cid", (req, res) => {
   }
   if (column      !== undefined) card.column      = column;
   if (title       !== undefined) card.title       = title;
+  if (desc        !== undefined) card.desc        = desc;
   if (agentId     !== undefined) card.agentId     = agentId;
   if (agentName   !== undefined) card.agentName   = agentName;
   if (agentAvatar !== undefined) card.agentAvatar = agentAvatar;
