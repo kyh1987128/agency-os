@@ -52,6 +52,9 @@ export default function ChatView({ activeProject = "default" }) {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [copyDone, setCopyDone] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
   const bottomRef = useRef(null);
   const activeBotRef = useRef(activeBot);
   activeBotRef.current = activeBot;
@@ -90,14 +93,42 @@ export default function ChatView({ activeProject = "default" }) {
   const addMsg = (m) => setMsgs((prev) => [...prev, m]);
   const updateMsg = (id, patch) => setMsgs((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
 
+  // 파일 첨부 → Dify 업로드
+  const handleFilePick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("bot", activeBot === "team" ? "director" : activeBot);
+      fd.append("pid", activeProject);
+      const r = await fetch(`${API}/api/dify-upload`, { method: "POST", body: fd });
+      const j = await r.json();
+      if (r.ok && (j.upload_file_id || j.text)) {
+        setAttachedFiles((p) => [...p, { ...j, cid: `f_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` }]);
+      } else {
+        alert("파일 업로드 실패: " + (j.message || j.error || "지원되지 않는 형식일 수 있어요"));
+      }
+    } catch (err) { alert("업로드 오류"); }
+    setUploading(false);
+  };
+  const removeFile = (cid) => setAttachedFiles((p) => p.filter((f) => f.cid !== cid));
+
   const sendMessage = async (text) => {
     const txt = (text ?? input).trim();
-    if (!txt || isTyping) return;
+    if ((!txt && attachedFiles.length === 0) || isTyping) return;
+    const filesToSend = attachedFiles.map((f) => ({ type: f.type, transfer_method: f.transfer_method, upload_file_id: f.upload_file_id, name: f.name, text: f.text }));
+    const fileNames = attachedFiles.map((f) => f.name);
     setInput("");
+    setAttachedFiles([]);
     setIsTyping(true);
     const bot = BOT_MAP[activeBot];
+    const query = txt || "첨부한 파일을 분석해줘.";
+    const displayContent = txt + (fileNames.length ? `\n📎 ${fileNames.join(", ")}` : "");
 
-    const userMsg = { id: `u_${Date.now()}`, clientId: CLIENT_ID, role: "user", senderName: "나", content: txt, timestamp: new Date().toISOString() };
+    const userMsg = { id: `u_${Date.now()}`, clientId: CLIENT_ID, role: "user", senderName: "나", content: displayContent, timestamp: new Date().toISOString() };
     addMsg(userMsg);
     fetch(`${API}/api/projects/${activeProject}/messages`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -109,7 +140,7 @@ export default function ChatView({ activeProject = "default" }) {
     try {
       const res = await fetch(`${API}/api/projects/${activeProject}/chat`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: txt, bot: activeBot, channel: activeBot, agentName: bot.name, msgId: aiMsgId }),
+        body: JSON.stringify({ message: query, bot: activeBot, channel: activeBot, agentName: bot.name, msgId: aiMsgId, files: filesToSend }),
       });
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -238,8 +269,21 @@ export default function ChatView({ activeProject = "default" }) {
 
         {/* 입력창 */}
         <div style={{ padding: "10px 18px", background: "#fff", borderTop: "1px solid #e2e8f0", flexShrink: 0 }}>
+          {/* 첨부 파일 칩 */}
+          {(attachedFiles.length > 0 || uploading) && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+              {attachedFiles.map((f) => (
+                <span key={f.cid} title={f.extracted ? `본문 추출됨 (${f.textLen}자)` : "본문 추출 불가 — 파일째 전달"} style={{ display: "flex", alignItems: "center", gap: 5, background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 7, padding: "3px 8px", fontSize: 11, color: "#4338ca" }}>
+                  {f.extracted ? "📄" : "📎"} {f.name}{f.extracted ? <span style={{ color: "#16a34a", fontSize: 10 }}>✓</span> : null}
+                  <span onClick={() => removeFile(f.cid)} style={{ cursor: "pointer", color: "#818cf8" }}>✕</span>
+                </span>
+              ))}
+              {uploading && <span style={{ fontSize: 11, color: "#94a3b8" }}>⏳ 업로드 중...</span>}
+            </div>
+          )}
+          <input ref={fileInputRef} type="file" onChange={handleFilePick} style={{ display: "none" }} accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.xls,.png,.jpg,.jpeg" />
           <div style={{ display: "flex", gap: 6 }}>
-            <button title="파일 첨부" style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px", fontSize: 13, cursor: "pointer" }}>📎</button>
+            <button title="파일 첨부 (공고문·양식 등)" onClick={() => fileInputRef.current?.click()} disabled={uploading} style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px", fontSize: 13, cursor: uploading ? "default" : "pointer" }}>📎</button>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -249,8 +293,8 @@ export default function ChatView({ activeProject = "default" }) {
             />
             <button
               onClick={() => sendMessage()}
-              disabled={isTyping || !input.trim()}
-              style={{ background: isTyping || !input.trim() ? "#e2e8f0" : "#6366f1", color: isTyping || !input.trim() ? "#94a3b8" : "#fff", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 12, fontWeight: 700, cursor: isTyping || !input.trim() ? "default" : "pointer" }}
+              disabled={isTyping || (!input.trim() && attachedFiles.length === 0)}
+              style={{ background: isTyping || (!input.trim() && attachedFiles.length === 0) ? "#e2e8f0" : "#6366f1", color: isTyping || (!input.trim() && attachedFiles.length === 0) ? "#94a3b8" : "#fff", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 12, fontWeight: 700, cursor: isTyping || (!input.trim() && attachedFiles.length === 0) ? "default" : "pointer" }}
             >전송</button>
           </div>
         </div>

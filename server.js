@@ -504,7 +504,7 @@ const DIFY_KEYS = {
 // 프로젝트+채널별 Dify conversation_id 유지 → 대화 맥락 보존
 const difyConversations = {};
 
-async function runDifyStream({ res, apiKey, query, user, convKey, onComplete }) {
+async function runDifyStream({ res, apiKey, query, user, convKey, files, onComplete }) {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -521,6 +521,7 @@ async function runDifyStream({ res, apiKey, query, user, convKey, onComplete }) 
         response_mode: "streaming",
         user: user || "agencyos",
         conversation_id: difyConversations[convKey] || "",
+        files: Array.isArray(files) ? files : [],
       }),
     });
     if (!r.ok) throw new Error(`Dify HTTP ${r.status}`);
@@ -598,21 +599,23 @@ async function callDifyBot(apiKey, query, user, onChunk) {
   return full;
 }
 
-async function runOrchestrator({ res, pid, message, onComplete }) {
+async function runOrchestrator({ res, pid, message, attachBlock = "", onComplete }) {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
   let full = "";
   const write = (t) => { full += t; res.write(`data: ${JSON.stringify({ text: t })}\n\n`); };
+  const attachNote = attachBlock ? `\n\n[첨부파일 본문]\n${attachBlock}` : "";
 
   try {
     write("🎯 **디렉터**가 요청을 분석하고 있습니다...\n\n");
+    if (attachBlock) write("📎 첨부파일을 함께 분석합니다.\n\n");
     const planPrompt =
       `너는 업무 오케스트레이터다. 아래 요청을 처리하기 위해 호출할 전문봇을 순서대로 골라라.\n` +
       `사용 가능한 봇 id: research(시장조사·웹검색), saup(사업계획서), jiwon(정부지원사업), service(서비스소개서), cs(고객응대문구), meeting(회의록), review(문서 검토감수), ppt(발표자료).\n` +
       `반드시 JSON 배열로만 답하라. 형식: [{"bot":"research","task":"그 봇에게 시킬 구체 지시(한국어)"}]. 불필요한 봇은 빼고 최대 3개. 설명 금지, JSON만.\n` +
-      `요청: ${message}`;
+      `요청: ${message}${attachNote}`;
     const planRaw = await callDifyBot(DIFY_KEYS.director, planPrompt, `proj_${pid}`);
     let plan = [];
     try { const m = planRaw.match(/\[[\s\S]*\]/); if (m) plan = JSON.parse(m[0]); } catch {}
@@ -620,7 +623,7 @@ async function runOrchestrator({ res, pid, message, onComplete }) {
 
     if (plan.length === 0) {
       write("→ 디렉터가 직접 답변합니다.\n\n---\n\n");
-      await callDifyBot(DIFY_KEYS.director, message, `proj_${pid}`, (c) => write(c));
+      await callDifyBot(DIFY_KEYS.director, `${message}${attachNote}`, `proj_${pid}`, (c) => write(c));
       res.write(`data: [DONE]\n\n`); res.end(); if (onComplete) onComplete(full); return;
     }
 
@@ -632,7 +635,8 @@ async function runOrchestrator({ res, pid, message, onComplete }) {
     for (const s of plan) {
       const b = ORCH_BOTS[s.bot];
       write(`\n### ${b.icon} ${b.name} 작업 중...\n\n`);
-      const q = context ? `${s.task}\n\n[이전 단계 결과 참고]\n${context.slice(0, 1800)}` : s.task;
+      let q = s.task + attachNote;
+      if (context) q += `\n\n[이전 단계 결과 참고]\n${context.slice(0, 1800)}`;
       const ans = await callDifyBot(b.key, q, `proj_${pid}`, (c) => write(c));
       context += `\n[${b.name}]\n${ans}\n`;
       write(`\n\n✅ **${b.name} 완료**\n\n---\n`);
@@ -860,18 +864,41 @@ app.delete("/api/projects/:pid/kanban/cards/:cid", (req, res) => {
 // 프로젝트별 채팅 / 메시지 API
 // ════════════════════════════════════════════════════════════════════════════════
 
+// 첨부파일 → 질문 주입 / Dify 파일포맷 정리 헬퍼
+function buildQueryWithFiles(message, files) {
+  if (!Array.isArray(files) || !files.length) return message;
+  const parts = files.filter((f) => f && f.text).map((f) => `[첨부파일: ${f.name || "문서"}]\n${f.text}`);
+  if (!parts.length) return message;
+  return `${parts.join("\n\n")}\n\n----------\n위 첨부파일 내용을 근거로 다음 요청에 답하세요.\n\n${message || "첨부한 파일을 분석해줘."}`;
+}
+function toDifyFiles(files) {
+  if (!Array.isArray(files)) return [];
+  return files
+    .filter((f) => f && f.upload_file_id)
+    .map((f) => ({ type: f.type || "document", transfer_method: f.transfer_method || "local_file", upload_file_id: f.upload_file_id }));
+}
+// 첨부파일 본문만 모아 블록으로 (오케스트레이터가 전문봇에 전달용)
+function attachmentBlock(files) {
+  if (!Array.isArray(files)) return "";
+  const parts = files.filter((f) => f && f.text).map((f) => `[첨부파일: ${f.name || "문서"}]\n${f.text}`);
+  return parts.length ? parts.join("\n\n") : "";
+}
+
 // POST /api/projects/:pid/chat → 프로젝트 채팅 (스트리밍)
 app.post("/api/projects/:pid/chat", (req, res) => {
   const { pid } = req.params;
-  const { message, agentId, agentName, agentTitle, channelName, channel, history = [], msgId, bot } = req.body;
-  console.log(`[REQ:${pid}] bot=${bot || agentId} / ${message?.slice(0, 30)}`);
+  const { message, agentId, agentName, agentTitle, channelName, channel, history = [], msgId, bot, files } = req.body;
+  console.log(`[REQ:${pid}] bot=${bot || agentId} / ${message?.slice(0, 30)}${files?.length ? ` (+${files.length}파일)` : ""}`);
 
   const targetChannel = channel || channelName || bot || "general";
+  // 첨부파일 본문을 질문에 주입(모든 봇 공통) + Dify 파일포맷 정리
+  const injectedMessage = buildQueryWithFiles(message, files);
+  const difyFiles = toDifyFiles(files);
 
   // 통합 디렉터 (오케스트레이터): 여러 전문봇을 조율
   if (bot === "team" || channel === "team") {
     return runOrchestrator({
-      res, pid, message,
+      res, pid, message: message || "첨부한 파일을 분석해줘.", attachBlock: attachmentBlock(files),
       onComplete: (full) => {
         if (full.trim()) persistMessage(targetChannel, {
           id: msgId || Date.now().toString(), role: "assistant",
@@ -888,9 +915,10 @@ app.post("/api/projects/:pid/chat", (req, res) => {
     return runDifyStream({
       res,
       apiKey: difyKey,
-      query: message,
+      query: injectedMessage,
       user: `proj_${pid}`,
       convKey: `${pid}:${targetChannel}`,
+      files: difyFiles,
       onComplete: (fullText) => {
         if (fullText.trim()) {
           persistMessage(targetChannel, {
@@ -911,7 +939,7 @@ app.post("/api/projects/:pid/chat", (req, res) => {
   const historyContext = history.length > 0
     ? "\n\n[이전 대화]\n" + history.map(h => `${h.role === "user" ? "사용자" : agentName}: ${h.content}`).join("\n")
     : "";
-  const prompt = historyContext ? `${historyContext}\n사용자: ${message}` : message;
+  const prompt = historyContext ? `${historyContext}\n사용자: ${injectedMessage}` : injectedMessage;
   runClaudeStream({
     res,
     systemPrompt,
@@ -1276,6 +1304,94 @@ app.patch("/api/todos/:id", (req, res) => {
 app.delete("/api/todos/:id", (req, res) => {
   saveTodos(loadTodos().filter((t) => t.id !== req.params.id));
   res.json({ ok: true });
+});
+
+// ── 첨부파일 텍스트 추출 ─────────────────────────────────────────────────────
+// Dify 앱별 문서 처리 동작이 일관되지 않아(일부 봇은 첨부파일 텍스트를 못 읽음),
+// 백엔드에서 직접 텍스트를 추출해 질문에 주입한다. → 모든 봇에서 동일하게 동작.
+const MAX_EXTRACT_CHARS = 16000;
+async function extractFileText(buffer, filename = "", mimetype = "") {
+  const ext = (filename.split(".").pop() || "").toLowerCase();
+  const mt = (mimetype || "").toLowerCase();
+  try {
+    // 플레인 텍스트 계열
+    if (
+      mt.startsWith("text/") ||
+      ["txt", "md", "markdown", "csv", "tsv", "json", "log", "xml", "yaml", "yml", "html", "htm"].includes(ext)
+    ) {
+      return clip(buffer.toString("utf8"));
+    }
+    // PDF
+    if (ext === "pdf" || mt === "application/pdf") {
+      const { PDFParse } = await import("pdf-parse");
+      const parser = new PDFParse({ data: buffer });
+      const r = await parser.getText();
+      return clip((r.text || "").replace(/\n--\s*\d+ of \d+\s*--\n?/g, "\n"));
+    }
+    // DOCX
+    if (ext === "docx" || mt.includes("officedocument.wordprocessingml")) {
+      const mammoth = (await import("mammoth")).default;
+      const r = await mammoth.extractRawText({ buffer });
+      return clip(r.value || "");
+    }
+  } catch (e) {
+    console.error("[extractFileText]", filename, e.message);
+  }
+  return ""; // 미지원(.hwp, .xlsx, 이미지 등) → 빈 문자열 (Dify 파일 첨부로 폴백)
+}
+function clip(s) {
+  s = (s || "").trim();
+  return s.length > MAX_EXTRACT_CHARS ? s.slice(0, MAX_EXTRACT_CHARS) + "\n…(이하 생략, 내용이 길어 일부만 표시)" : s;
+}
+
+// ── Dify 파일 업로드 프록시 (채팅 첨부) ───────────────────────────────────────
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+app.post("/api/dify-upload", memUpload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "no file" });
+  const bot = req.body.bot || "director";
+  const apiKey = DIFY_KEYS[bot] || DIFY_KEYS.director;
+  const user = `proj_${req.body.pid || "default"}`;
+  const isImage = (req.file.mimetype || "").startsWith("image/");
+  // multer/busboy가 파일명을 latin1로 디코딩 → 한글 깨짐. utf8로 복원.
+  let originalName = req.file.originalname;
+  try { originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8"); } catch {}
+
+  // 1) 백엔드 텍스트 추출 (모든 봇에서 동일하게 동작하도록 질문에 주입할 텍스트)
+  const text = isImage ? "" : await extractFileText(req.file.buffer, originalName, req.file.mimetype);
+
+  // 2) Dify 파일 업로드 (이미지 비전 / 추출 실패 시 폴백). 베스트-에포트.
+  let upload_file_id = null;
+  try {
+    const form = new FormData();
+    form.append("file", new Blob([req.file.buffer], { type: req.file.mimetype || "application/octet-stream" }), originalName);
+    form.append("user", user);
+    const r = await fetch(`${DIFY_BASE}/files/upload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    });
+    const j = await r.json();
+    if (r.ok) upload_file_id = j.id;
+    else console.error("[dify-upload]", r.status, JSON.stringify(j).slice(0, 200));
+  } catch (e) {
+    console.error("[dify-upload]", e.message);
+  }
+
+  // 텍스트도 못 뽑고 Dify 업로드도 실패하면 에러
+  if (!upload_file_id && !text) {
+    return res.status(502).json({ error: "파일을 처리하지 못했습니다(텍스트 추출·업로드 모두 실패)." });
+  }
+
+  res.json({
+    id: upload_file_id,
+    name: originalName,
+    type: isImage ? "image" : "document",
+    transfer_method: "local_file",
+    upload_file_id,
+    text,                       // 추출된 본문(질문에 주입)
+    textLen: text.length,
+    extracted: text.length > 0, // 텍스트 추출 성공 여부
+  });
 });
 
 // ── SSE 브로드캐스트 스트림 ───────────────────────────────────────────────────
