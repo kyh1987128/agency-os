@@ -212,15 +212,14 @@ export default function ChatView({ activeProject = "default", handoff = null }) 
 
   const saveToKanban = async () => {
     if (!artifact) return;
+    // 칸반 보드는 노드(/api/data/.../nodes)를 읽으므로 노드로 생성해야 보드·간트·캘린더·대시보드에 모두 반영됨
     try {
-      const r = await fetch(`${API}/api/projects/${activeProject}/kanban/cards`, {
+      const r = await fetch(`${API}/api/data/projects/${activeProject}/nodes`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: artifactTitle || `${cur.name} 결과`,
           desc: artifact,
-          column: "todo",
-          agentId: cur.id, agentName: cur.name, agentAvatar: cur.icon,
-          projectId: activeProject !== "default" ? activeProject : null,
+          status: "todo",
         }),
       });
       if (r.ok) flash("📌 칸반에 저장됨!"); else flash("저장 실패");
