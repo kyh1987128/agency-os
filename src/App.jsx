@@ -8,6 +8,7 @@ import KanbanView from "./components/KanbanView";
 import ChatView from "./components/ChatView";
 import KnowledgeCenter from "./components/KnowledgeCenter";
 import BoardView from "./components/BoardView";
+import BoardWidget from "./components/BoardWidget";
 import GanttView from "./components/GanttView";
 import CalendarView from "./components/CalendarView";
 import ArchiveView from "./components/ArchiveView";
@@ -126,7 +127,7 @@ export default function App() {
             <span style={{ fontSize: 13, fontWeight: 700, color: T }}>📋 게시판 <span style={{ fontSize: 10, color: M, fontWeight: 400 }}>· 사내 소통</span></span>
             <span style={{ fontSize: 10, color: M }}>{new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" })}</span>
           </div>
-          <BoardView humans={humans} />
+          <BoardView humans={humans} activeProject={activeProject} />
         </div>
       ) : tab === "archive" ? (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -157,7 +158,8 @@ export default function App() {
 
             {tab === "dashboard" && (
               <>
-                <div style={{ height: "calc(55vh - 36px)", minHeight: 320, flexShrink: 0 }}>
+                <BoardWidget onGo={() => setTab("board")} />
+                <div style={{ height: "calc(55vh - 120px)", minHeight: 300, flexShrink: 0 }}>
                   <OntologyGraph onNodeClick={setModal} projData={computedProjData} departments={departments} humans={humans} />
                 </div>
                 <TasksTable onTaskClick={setModal} projData={computedProjData} allNodes={allNodes} departments={departments} humans={humans} />

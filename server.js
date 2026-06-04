@@ -914,8 +914,8 @@ app.post("/api/projects/:pid/chat", (req, res) => {
   let injectedMessage = buildQueryWithFiles(message, files);
   const difyFiles = toDifyFiles(files);
   // 회사 드라이브 지식 자동 참조 (관련 문서 본문을 컨텍스트로 주입)
-  const driveCtx = searchDriveForChat(message);
-  if (driveCtx) injectedMessage = `[참고용 회사 자료 — 질문과 관련될 때만 근거로 쓰고, 관련 없으면 이 자료를 언급하지 말고 평소대로 답하세요]\n${driveCtx}\n----------\n질문: ${injectedMessage}`;
+  const refCtx = [searchDriveForChat(message), searchBoardsForChat(message)].filter(Boolean).join("\n\n");
+  if (refCtx) injectedMessage = `[참고용 회사 자료 — 질문과 관련될 때만 근거로 쓰고, 관련 없으면 이 자료를 언급하지 말고 평소대로 답하세요]\n${refCtx}\n----------\n질문: ${injectedMessage}`;
 
   // 통합 디렉터 (오케스트레이터): 여러 전문봇을 조율
   if (bot === "team" || channel === "team") {
@@ -1695,18 +1695,73 @@ const bCommentsPath = () => path.join(DATA_DIR, "board_comments.json");
 const bNotisPath = () => path.join(DATA_DIR, "board_notis.json");
 function loadJSON(p, def) { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return def; } }
 function saveJSON(p, d) { ensureDataDir(); fs.writeFileSync(p, JSON.stringify(d, null, 2), "utf8"); }
-function ensureBoardsSeed() {
-  if (fs.existsSync(boardsPath())) return;
-  const seed = [
-    { id: "notice", name: "공지사항", icon: "📢", color: "#ef4444", group: "소통", type: "post", writePerm: "admin", anonymous: false, mustRead: true, order: 1 },
-    { id: "free", name: "자유게시판", icon: "💬", color: "#6366f1", group: "소통", type: "post", writePerm: "all", anonymous: false, mustRead: false, order: 2 },
-    { id: "suggest", name: "건의·제안", icon: "💡", color: "#f59e0b", group: "소통", type: "post", writePerm: "all", anonymous: true, mustRead: false, order: 3 },
-    { id: "request", name: "업무요청", icon: "🙋", color: "#10b981", group: "업무", type: "request", writePerm: "all", anonymous: false, mustRead: false, order: 4 },
-    { id: "resource", name: "자료공유", icon: "📁", color: "#0ea5e9", group: "자료", type: "post", writePerm: "all", anonymous: false, mustRead: false, order: 5 },
-  ];
-  saveJSON(boardsPath(), seed);
+const DEFAULT_BOARDS = [
+  // 소통
+  { id: "notice", name: "공지사항", icon: "📢", color: "#ef4444", group: "소통", type: "post", writePerm: "admin", mustRead: true },
+  { id: "free", name: "자유게시판", icon: "💬", color: "#6366f1", group: "소통", type: "post", writePerm: "all" },
+  { id: "suggest", name: "건의·제안", icon: "💡", color: "#f59e0b", group: "소통", type: "post", writePerm: "all", anonymous: true },
+  { id: "praise", name: "칭찬·감사", icon: "👏", color: "#ec4899", group: "소통", type: "post", writePerm: "all" },
+  { id: "lunch", name: "맛집·점심", icon: "🍜", color: "#f97316", group: "소통", type: "post", writePerm: "all" },
+  { id: "event", name: "경조사", icon: "🎉", color: "#a855f7", group: "소통", type: "post", writePerm: "all" },
+  // 업무
+  { id: "request", name: "업무요청", icon: "🙋", color: "#10b981", group: "업무", type: "request", writePerm: "all" },
+  { id: "fixreq", name: "장비 수리신고", icon: "🔧", color: "#64748b", group: "업무", type: "request", writePerm: "all" },
+  { id: "booking", name: "장비·스튜디오 예약", icon: "📷", color: "#3b82f6", group: "업무", type: "post", writePerm: "all" },
+  { id: "grant", name: "지원사업·공모전 공고", icon: "🏛️", color: "#0ea5e9", group: "업무", type: "post", writePerm: "all" },
+  { id: "edu", name: "교육·세미나", icon: "🎓", color: "#8b5cf6", group: "업무", type: "post", writePerm: "all" },
+  // 자료
+  { id: "resource", name: "자료공유", icon: "📁", color: "#0ea5e9", group: "자료", type: "post", writePerm: "all" },
+  { id: "links", name: "링크 바로가기", icon: "🔗", color: "#06b6d4", group: "자료", type: "post", writePerm: "all" },
+  { id: "price", name: "견적·단가표", icon: "💰", color: "#eab308", group: "자료", type: "post", writePerm: "all" },
+  { id: "portfolio", name: "포트폴리오", icon: "🎞️", color: "#f43f5e", group: "자료", type: "post", writePerm: "all" },
+  { id: "client", name: "거래처 정보", icon: "🤝", color: "#14b8a6", group: "자료", type: "post", writePerm: "all" },
+  // 보안
+  { id: "vault", name: "공유 계정", icon: "🔑", color: "#dc2626", group: "보안", type: "post", writePerm: "all", secret: true },
+];
+function ensureBoards() {
+  const def = (b, i) => ({ color: "#6366f1", group: "기타", type: "post", writePerm: "all", anonymous: false, mustRead: false, secret: false, hidden: false, ...b, order: i + 1 });
+  let boards = loadJSON(boardsPath(), null);
+  if (!boards) { saveJSON(boardsPath(), DEFAULT_BOARDS.map(def)); return; }
+  const ids = new Set(boards.map((b) => b.id));
+  let added = false;
+  DEFAULT_BOARDS.forEach((b, i) => { if (!ids.has(b.id)) { boards.push(def(b, boards.length)); added = true; } });
+  if (added) saveJSON(boardsPath(), boards);
 }
-ensureBoardsSeed();
+ensureBoards();
+// 게시판별 사용안내 글 (비어있는 게시판에만 1회 시드)
+const BOARD_GUIDES = {
+  notice: "# 📢 공지사항 사용안내\n회사 공식 알림을 올리는 곳입니다. **관리자만** 글을 쓸 수 있고, 중요한 글은 📌고정됩니다.\n\n- 모든 직원이 봐야 하는 내용 → **필독확인** 으로 누가 읽었는지 체크됩니다.\n- 예: 워크샵 일정, 사내 규정 변경, 휴무 안내",
+  free: "# 💬 자유게시판 사용안내\n아무 얘기나 편하게! 잡담·소식·질문 환영합니다.\n\n- 예: \"오늘 날씨 좋네요\", \"이거 아시는 분?\", 소소한 일상 공유",
+  suggest: "# 💡 건의·제안 사용안내\n회사를 더 좋게 만들 아이디어·불편사항을 올려주세요. **익명**으로 쓸 수 있습니다.\n\n- 예: \"휴게실에 정수기 있으면 좋겠어요\", \"회의가 너무 길어요\"",
+  praise: "# 👏 칭찬·감사 사용안내\n동료에게 고마운 일, 잘한 일을 남겨주세요. 서로 칭찬하면 분위기가 좋아집니다.\n\n- 예: \"@민호 님 덕분에 마감 무사히! 감사합니다 🙏\"",
+  lunch: "# 🍜 맛집·점심 사용안내\n회사 근처 맛집 공유, 점심 같이 먹을 사람 모집!\n\n- 예: \"회성동 국밥집 추천\", \"오늘 1시 같이 가실 분?\"",
+  event: "# 🎉 경조사 사용안내\n결혼·출산·부고 등 경조사를 알리는 곳입니다.\n\n- 예: \"OO님 결혼식 안내\", \"부친상 알림\"",
+  request: "# 🙋 업무요청 사용안내\n다른 사람/팀에게 일을 요청하는 곳입니다. **담당·마감·상태(요청→진행→완료)** 로 추적됩니다.\n\n- 글을 쓰면 [목록/칸반] 으로 볼 수 있고, **칸반 카드로 전환** 가능\n- 예: \"세영테크 CF 편집 요청 (마감 6/8)\"",
+  fixreq: "# 🔧 장비 수리신고 사용안내\n고장난 장비·시설을 신고하는 곳입니다. 상태(요청→진행→완료)로 처리됩니다.\n\n- 예: \"호리존 조명 1개 깜빡임\", \"3번 카메라 배터리 안 됨\"",
+  booking: "# 📷 장비·스튜디오 예약 사용안내\n호리존·크리에이팅룸·카메라 등 **예약·사용 현황**을 공유합니다.\n\n- 예: \"6/10 오후 호리존 촬영 예약\", \"SONY 카메라 2번 외부반출\"",
+  grant: "# 🏛️ 지원사업·공모전 공고 사용안내\n지원사업·공모전 **공고와 마감일**을 모아둡니다. (지원사업 봇과 연계)\n\n- 예: \"2026 청년창업 지원사업 (마감 7/14)\" + 공고문 첨부",
+  edu: "# 🎓 교육·세미나 사용안내\n유용한 교육·웨비나·세미나 정보를 공유합니다.\n\n- 예: \"영상 색보정 무료 강의\", \"마케팅 세미나 6/20\"",
+  resource: "# 📁 자료공유 사용안내\n업무에 쓰는 양식·자료·레퍼런스를 공유합니다. **드라이브 첨부**·파일 첨부 활용.\n\n- 예: \"제안서 최신 양식\", \"촬영 체크리스트\"",
+  links: "# 🔗 링크 바로가기 사용안내\n자주 쓰는 사이트 링크를 모아둡니다. URL을 붙이면 **미리보기 카드**로 보입니다.\n\n- 예: 기업마당, 인스타 관리, 유튜브 스튜디오, 세금계산서 사이트",
+  price: "# 💰 견적·단가표 사용안내\n표준 견적·단가를 정리합니다. 제안서 쓸 때 참고용.\n\n- 예: \"영상 제작 단가표\", \"드론 촬영 단가\"",
+  portfolio: "# 🎞️ 포트폴리오 사용안내\n완성한 작업물(영상·디자인)을 모아둡니다. 실적 증빙·제안서에 재활용.\n\n- 예: \"성산구청 홍보영상\" + 유튜브 임베드",
+  client: "# 🤝 거래처 정보 사용안내\n거래처·협력사 연락처·과거 작업·특이사항을 정리합니다.\n\n- 예: \"(주)오니트 - 담당 OOO, 과거 5건 진행\"",
+  vault: "# 🔑 공유 계정 사용안내\n⚠️ **회사 공용 계정(인스타·유튜브 등) ID/비번을 공유하는 곳입니다.**\n\n- 🔒 이 게시판은 **봇 검색·통합검색에서 제외**됩니다 (외부 노출 방지)\n- 내부 직원만 보세요. 개인 계정·민감 정보는 올리지 마세요.\n- 예: \"회사 인스타: ID xxx / PW xxx\"",
+};
+function ensureBoardGuides() {
+  const posts = loadJSON(bPostsPath(), []);
+  const boards = loadJSON(boardsPath(), []);
+  let changed = false;
+  boards.forEach((b) => {
+    if (posts.some((p) => p.boardId === b.id)) return; // 이미 글 있으면 스킵
+    const guide = BOARD_GUIDES[b.id];
+    if (!guide) return;
+    posts.push({ id: randomUUID().slice(0, 8), no: 1, boardId: b.id, title: "📌 " + (guide.split("\n")[0].replace(/^#+\s*/, "")), body: guide, authorId: "system", authorName: "운영", authorAvatar: "🛠️", anonymous: false, pinned: true, tags: ["안내"], attachments: [], driveRefs: [], wikiRefs: [], views: 0, likes: [], readBy: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    changed = true;
+  });
+  if (changed) saveJSON(bPostsPath(), posts);
+}
+ensureBoardGuides();
 function addNoti({ userId, type, postId, boardId, fromName, text }) {
   if (!userId) return;
   const notis = loadJSON(bNotisPath(), []);
@@ -1844,6 +1899,43 @@ app.get("/api/link-preview", async (req, res) => {
     const title = meta("og:title") || (html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || "").trim();
     res.json({ url, title: title.slice(0, 120), description: (meta("og:description") || meta("description")).slice(0, 200), image: meta("og:image"), site: meta("og:site_name") });
   } catch (e) { res.json({ url, title: url, description: "", image: "", site: "" }); }
+});
+
+// ── 봇 연동: 게시판 글 검색 → 채팅 컨텍스트 (금고/secret 게시판 제외) ──
+function searchBoardsForChat(query) {
+  if (!query || query.trim().length < 4) return "";
+  const boards = loadJSON(boardsPath(), []);
+  const secret = new Set(boards.filter((b) => b.secret).map((b) => b.id));
+  const bn = Object.fromEntries(boards.map((b) => [b.id, b.name]));
+  const terms = query.toLowerCase().split(/\s+/).filter((w) => w.length >= 2);
+  if (!terms.length) return "";
+  const scored = loadJSON(bPostsPath(), []).filter((p) => !secret.has(p.boardId))
+    .map((p) => ({ p, score: terms.filter((t) => (`${p.title} ${p.body}`).toLowerCase().includes(t)).length }))
+    .filter((x) => x.score >= Math.min(2, terms.length)).sort((a, b) => b.score - a.score).slice(0, 2);
+  if (!scored.length) return "";
+  return scored.map(({ p }) => `\n[게시판:${bn[p.boardId] || ""}] ${p.title}\n${maskSensitive((p.body || "").slice(0, 1500))}`).join("\n").trim();
+}
+// 위키 간단 검색 (data/wiki 직접 읽기, 구조 바뀌어도 안전)
+function searchWikiSimple(ql) {
+  try {
+    const dir = path.join(DATA_DIR, "wiki");
+    return fs.readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); } catch { return null; } }).filter(Boolean)
+      .filter((d) => (`${d.title || ""} ${d.body || ""}`).toLowerCase().includes(ql)).slice(0, 8)
+      .map((d) => ({ id: d.id, title: d.title, type: d.type || "wiki", snippet: (d.body || "").replace(/[#*`>\[\]!()]/g, "").slice(0, 80) }));
+  } catch { return []; }
+}
+// ── 통합검색: 게시판 + 위키 + 드라이브 ──
+app.get("/api/search/all", (req, res) => {
+  const q = (req.query.q || "").trim(); if (!q) return res.json({ boards: [], wiki: [], drive: [] });
+  const ql = q.toLowerCase();
+  const boards = loadJSON(boardsPath(), []);
+  const secret = new Set(boards.filter((b) => b.secret).map((b) => b.id));
+  const bm = Object.fromEntries(boards.map((b) => [b.id, b]));
+  const bResults = loadJSON(bPostsPath(), []).filter((p) => !secret.has(p.boardId)).filter((p) => (`${p.title} ${p.body} ${p.authorName}`).toLowerCase().includes(ql)).slice(0, 8)
+    .map((p) => ({ id: p.id, boardId: p.boardId, boardName: bm[p.boardId]?.name, boardIcon: bm[p.boardId]?.icon, title: p.title, snippet: (p.body || "").replace(/[#*`>\[\]]/g, "").slice(0, 80), author: p.authorName, date: p.createdAt }));
+  let drive = [];
+  try { if (driveMini) drive = driveMini.search(q).slice(0, 6).map((h) => { const d = driveIndex[h.id] || {}; return { name: d.name, folder: d.folder, type: d.type, hasText: !!d.text }; }); } catch {}
+  res.json({ boards: bResults, wiki: searchWikiSimple(ql), drive });
 });
 
 // ── SSE 브로드캐스트 스트림 ───────────────────────────────────────────────────

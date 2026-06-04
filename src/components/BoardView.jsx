@@ -39,7 +39,7 @@ const fmtDate = (d) => d ? new Date(d).toLocaleDateString("ko-KR", { month: "2-d
 const fmtFull = (d) => d ? new Date(d).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
 
 // ── 메인 ──────────────────────────────────────────────────────────────────
-export default function BoardView({ humans = [] }) {
+export default function BoardView({ humans = [], activeProject = "default" }) {
   const [boards, setBoards] = useState([]);
   const [me, setMe] = useState(() => { try { return JSON.parse(localStorage.getItem("boardMe")); } catch { return null; } });
   const [activeBoard, setActiveBoard] = useState(null);
@@ -48,12 +48,20 @@ export default function BoardView({ humans = [] }) {
   const [notis, setNotis] = useState([]);
   const [showNoti, setShowNoti] = useState(false);
   const [creatingBoard, setCreatingBoard] = useState(false);
+  const [gq, setGq] = useState("");           // 통합검색어
+  const [gres, setGres] = useState(null);     // 통합검색 결과
 
   const loadBoards = () => fetch(`${API}/api/boards`).then((r) => r.json()).then((d) => { setBoards(d); if (!activeBoard && d.length) setActiveBoard(d[0].id); }).catch(() => {});
   useEffect(() => { loadBoards(); }, []);
   useEffect(() => { if (!me && humans.length) { setMe(humans[0]); localStorage.setItem("boardMe", JSON.stringify(humans[0])); } }, [humans]);
   const loadNotis = () => { if (me) fetch(`${API}/api/notifications/${me.id}`).then((r) => r.json()).then((d) => setNotis(Array.isArray(d) ? d : [])).catch(() => {}); };
   useEffect(() => { loadNotis(); const t = setInterval(loadNotis, 15000); return () => clearInterval(t); }, [me]);
+  useEffect(() => {
+    const q = gq.trim();
+    if (q.length < 2) { setGres(null); return; }
+    const t = setTimeout(() => fetch(`${API}/api/search/all?q=${encodeURIComponent(q)}`).then((r) => r.json()).then(setGres).catch(() => {}), 350);
+    return () => clearTimeout(t);
+  }, [gq]);
 
   const board = boards.find((b) => b.id === activeBoard) || null;
   const unread = notis.filter((n) => !n.read).length;
@@ -78,6 +86,9 @@ export default function BoardView({ humans = [] }) {
             {humans.map((h) => <option key={h.id} value={h.id}>{h.avatar} {h.name}</option>)}
           </select>
         </div>
+        <div style={{ padding: "7px 12px", borderBottom: "1px solid #f1f5f9" }}>
+          <input value={gq} onChange={(e) => setGq(e.target.value)} placeholder="🔍 통합검색 (게시판·위키·드라이브)" style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 10px", fontSize: 11.5, outline: "none", color: "#1e293b" }} />
+        </div>
         <div style={{ padding: "8px 10px" }}>
           <button onClick={() => { setCreatingBoard(true); setView("list"); }} style={{ width: "100%", background: "#eef2ff", color: "#4338ca", border: "1px dashed #c7d2fe", borderRadius: 7, padding: "7px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ 게시판 만들기</button>
         </div>
@@ -98,14 +109,16 @@ export default function BoardView({ humans = [] }) {
 
       {/* 본문 */}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        {creatingBoard ? (
+        {gres && gq.trim().length >= 2 ? (
+          <SearchResults gres={gres} q={gq} onOpenPost={(boardId, postId) => { setActiveBoard(boardId); setGq(""); setGres(null); openPost(postId); }} onClear={() => { setGq(""); setGres(null); }} />
+        ) : creatingBoard ? (
           <NewBoardForm onCreate={async (data) => { await fetch(`${API}/api/boards`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }); setCreatingBoard(false); loadBoards(); }} onCancel={() => setCreatingBoard(false)} />
         ) : !board ? (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8" }}>게시판을 선택하세요</div>
         ) : view === "write" ? (
           <PostWrite board={board} me={me} humans={humans} onCancel={() => setView("list")} onDone={(p) => { setView("detail"); setSelPostId(p.id); }} />
         ) : view === "detail" && selPostId ? (
-          <PostDetail postId={selPostId} board={board} me={me} humans={humans} onBack={() => setView("list")} onDeleted={() => setView("list")} onEdit={() => setView("write")} />
+          <PostDetail postId={selPostId} board={board} me={me} humans={humans} activeProject={activeProject} onBack={() => setView("list")} onDeleted={() => setView("list")} onEdit={() => setView("write")} />
         ) : (
           <PostList board={board} me={me} onOpen={openPost} onWrite={() => setView("write")} />
         )}
@@ -122,10 +135,14 @@ function PostList({ board, me, onOpen, onWrite }) {
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
+  const [mode, setMode] = useState("list");
+  const [kb, setKb] = useState([]);
+  const isReq = board.type === "request";
 
   const load = () => fetch(`${API}/api/boards/${board.id}/posts?page=${page}&q=${encodeURIComponent(query)}`).then((r) => r.json()).then(setData).catch(() => {});
   useEffect(() => { load(); }, [board.id, page, query]);
-  useEffect(() => { setPage(1); }, [board.id]);
+  useEffect(() => { setPage(1); setMode("list"); }, [board.id]);
+  useEffect(() => { if (isReq && mode === "kanban") fetch(`${API}/api/boards/${board.id}/posts?size=200`).then((r) => r.json()).then((d) => setKb([...d.pinned, ...d.posts])).catch(() => {}); }, [board.id, mode]);
 
   const canWrite = board.writePerm !== "admin" || true; // 1차: 권한 UI만, 실제 제한은 추후
   const Row = ({ p, pinned }) => (
@@ -151,17 +168,40 @@ function PostList({ board, me, onOpen, onWrite }) {
         <span style={{ fontSize: 17 }}>{board.icon}</span>
         <span style={{ fontSize: 16, fontWeight: 800, color: "#1e293b" }}>{board.name}</span>
         <span style={{ fontSize: 11, color: "#94a3b8" }}>· 글 {data.total}</span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { setQuery(q); setPage(1); } }} placeholder="🔍 제목+내용 검색" style={{ border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 10px", fontSize: 12, outline: "none", width: 180, color: "#1e293b" }} />
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          {isReq && <div style={{ display: "flex", border: "1px solid #e2e8f0", borderRadius: 7, overflow: "hidden" }}>
+            {[["list", "📋 목록"], ["kanban", "🗂 칸반"]].map(([m, l]) => <button key={m} onClick={() => setMode(m)} style={{ border: "none", background: mode === m ? "#6366f1" : "#fff", color: mode === m ? "#fff" : "#64748b", padding: "6px 11px", fontSize: 11.5, cursor: "pointer", fontWeight: 700 }}>{l}</button>)}
+          </div>}
+          <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { setQuery(q); setPage(1); } }} placeholder="🔍 제목+내용 검색" style={{ border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 10px", fontSize: 12, outline: "none", width: 160, color: "#1e293b" }} />
           <button onClick={onWrite} style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "6px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>✏ 글쓰기</button>
         </div>
       </div>
-      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-        {data.pinned.map((p) => <Row key={p.id} p={p} pinned />)}
-        {data.posts.map((p) => <Row key={p.id} p={p} />)}
-        {data.posts.length === 0 && data.pinned.length === 0 && <div style={{ textAlign: "center", color: "#cbd5e1", fontSize: 13, padding: "50px 0" }}>아직 글이 없습니다. 첫 글을 써보세요!</div>}
-      </div>
-      {data.pages > 1 && (
+      {isReq && mode === "kanban" ? (
+        <div style={{ flex: 1, display: "flex", gap: 12, padding: 16, overflowX: "auto", minHeight: 0, background: "#f8fafc" }}>
+          {["요청", "진행", "완료"].map((st) => {
+            const items = kb.filter((p) => (p.status || "요청") === st);
+            return (
+              <div key={st} style={{ flex: "1 1 0", minWidth: 220, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <div style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontSize: 12.5, fontWeight: 700, color: st === "완료" ? "#16a34a" : st === "진행" ? "#2563eb" : "#a16207" }}>{st} <span style={{ color: "#cbd5e1" }}>{items.length}</span></div>
+                <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
+                  {items.map((p) => <div key={p.id} onClick={() => onOpen(p.id)} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 11px", marginBottom: 6, cursor: "pointer", background: "#fff" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>{p.title}</div>
+                    <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 4 }}>{p.authorAvatar} {p.authorName}{p.dueDate ? ` · ~${p.dueDate}` : ""}{p.commentCount ? ` · 💬${p.commentCount}` : ""}</div>
+                  </div>)}
+                  {items.length === 0 && <div style={{ fontSize: 10.5, color: "#cbd5e1", textAlign: "center", padding: "10px 0" }}>없음</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+          {data.pinned.map((p) => <Row key={p.id} p={p} pinned />)}
+          {data.posts.map((p) => <Row key={p.id} p={p} />)}
+          {data.posts.length === 0 && data.pinned.length === 0 && <div style={{ textAlign: "center", color: "#cbd5e1", fontSize: 13, padding: "50px 0" }}>아직 글이 없습니다. 첫 글을 써보세요!</div>}
+        </div>
+      )}
+      {mode === "list" && data.pages > 1 && (
         <div style={{ display: "flex", justifyContent: "center", gap: 4, padding: "12px", borderTop: "1px solid #f1f5f9" }}>
           {Array.from({ length: data.pages }, (_, i) => i + 1).map((n) => (
             <button key={n} onClick={() => setPage(n)} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid " + (page === n ? "#6366f1" : "#e2e8f0"), background: page === n ? "#6366f1" : "#fff", color: page === n ? "#fff" : "#64748b", cursor: "pointer", fontSize: 12, fontWeight: page === n ? 700 : 400 }}>{n}</button>
@@ -173,11 +213,12 @@ function PostList({ board, me, onOpen, onWrite }) {
 }
 
 // ── 글 상세 ────────────────────────────────────────────────────────────────────
-function PostDetail({ postId, board, me, humans, onBack, onDeleted, onEdit }) {
+function PostDetail({ postId, board, me, humans, activeProject, onBack, onDeleted, onEdit }) {
   const [post, setPost] = useState(null);
   const [comments, setComments] = useState([]);
   const [ctext, setCtext] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
+  const [kanbanMsg, setKanbanMsg] = useState("");
 
   const load = () => fetch(`${API}/api/posts/${postId}`).then((r) => r.json()).then(setPost).catch(() => {});
   const loadC = () => fetch(`${API}/api/posts/${postId}/comments`).then((r) => r.json()).then((d) => setComments(Array.isArray(d) ? d : [])).catch(() => {});
@@ -191,6 +232,7 @@ function PostDetail({ postId, board, me, humans, onBack, onDeleted, onEdit }) {
   const markRead = async () => { await fetch(`${API}/api/posts/${postId}/read`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: me?.id }) }); load(); };
   const togglePin = async () => { await fetch(`${API}/api/posts/${postId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !post.pinned }) }); load(); };
   const setStatus = async (s) => { await fetch(`${API}/api/posts/${postId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: s }) }); load(); };
+  const toKanban = async () => { try { await fetch(`${API}/api/projects/${activeProject}/kanban/cards`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: post.title, desc: (post.body || "") + `\n\n📋 게시판 업무요청: ${board.name}`, column: "todo", projectId: activeProject }) }); setKanbanMsg("✅ 칸반에 추가됨"); setTimeout(() => setKanbanMsg(""), 2500); } catch {} };
   const del = async () => { await fetch(`${API}/api/posts/${postId}`, { method: "DELETE" }); onDeleted(); };
   const submitComment = async () => {
     if (!ctext.trim()) return;
@@ -218,10 +260,12 @@ function PostDetail({ postId, board, me, humans, onBack, onDeleted, onEdit }) {
           <span style={{ color: "#475569", fontWeight: 600 }}>{post.authorAvatar} {post.authorName}</span>
           <span>· {fmtFull(post.createdAt)}</span><span>· 👁 {post.views}</span>
           {board.type === "request" && (
-            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5 }}>상태
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>상태
               <select value={post.status || "요청"} onChange={(e) => setStatus(e.target.value)} style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "2px 6px", fontSize: 11 }}>
                 <option>요청</option><option>진행</option><option>완료</option>
               </select>
+              {kanbanMsg ? <span style={{ fontSize: 11, color: "#16a34a", fontWeight: 700 }}>{kanbanMsg}</span>
+                : <button onClick={toKanban} style={{ border: "1px solid #c7d2fe", background: "#eef2ff", color: "#4338ca", borderRadius: 6, padding: "3px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>📌 칸반 카드로</button>}
             </span>
           )}
           {(post.tags || []).map((t) => <span key={t} style={{ background: "#f1f5f9", padding: "1px 7px", borderRadius: 8, color: "#64748b" }}>#{t}</span>)}
@@ -396,6 +440,23 @@ function NotiDropdown({ notis, onClose, onRead, onOpen }) {
           <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>{fmtFull(n.createdAt)}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// 통합검색 결과
+function SearchResults({ gres, q, onOpenPost, onClear }) {
+  const { boards = [], wiki = [], drive = [] } = gres || {};
+  const total = boards.length + wiki.length + drive.length;
+  const Sec = ({ title, children }) => <div style={{ marginBottom: 18 }}><div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", marginBottom: 8 }}>{title}</div>{children}</div>;
+  const rowS = { border: "1px solid #f1f5f9", borderRadius: 8, padding: "10px 12px", marginBottom: 6 };
+  return (
+    <div style={{ flex: 1, overflowY: "auto", background: "#fff", padding: "18px 24px" }}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: "#1e293b", marginBottom: 14 }}>🔍 "{q}" 통합검색 <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 400 }}>· {total}건</span> <span onClick={onClear} style={{ marginLeft: 8, fontSize: 11, color: "#6366f1", cursor: "pointer" }}>✕ 닫기</span></div>
+      {total === 0 && <div style={{ color: "#cbd5e1", fontSize: 13, padding: "30px 0", textAlign: "center" }}>결과 없음</div>}
+      {boards.length > 0 && <Sec title="📋 게시판">{boards.map((b) => <div key={b.id} onClick={() => onOpenPost(b.boardId, b.id)} style={{ ...rowS, cursor: "pointer" }}><b style={{ fontSize: 13, color: "#1e293b" }}>{b.boardIcon} {b.title}</b><div style={{ fontSize: 11.5, color: "#64748b", marginTop: 3 }}>{b.snippet}</div><div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 3 }}>{b.boardName} · {b.author}</div></div>)}</Sec>}
+      {wiki.length > 0 && <Sec title="📖 위키/매뉴얼">{wiki.map((w) => <div key={w.id} style={rowS}><b style={{ fontSize: 13, color: "#1e293b" }}>{w.type === "manual" ? "📋" : "📖"} {w.title}</b><div style={{ fontSize: 11.5, color: "#64748b", marginTop: 3 }}>{w.snippet}</div></div>)}</Sec>}
+      {drive.length > 0 && <Sec title="📁 회사 드라이브">{drive.map((d, i) => <div key={i} style={rowS}><b style={{ fontSize: 13, color: "#1e293b" }}>{d.type === "image" ? "🖼" : d.type === "video" ? "🎬" : "📄"} {d.name}</b><div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 3 }}>{d.folder}{d.hasText ? " · 본문있음" : ""}</div></div>)}</Sec>}
     </div>
   );
 }
