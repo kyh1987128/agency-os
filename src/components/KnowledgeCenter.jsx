@@ -41,6 +41,10 @@ function preprocess(body, docs) {
     const t = title.trim(); const d = docs.find((x) => x.title === t);
     return `[${t}](${d ? `#wiki:${d.id}` : `#wikinew:${encodeURIComponent(t)}`})`;
   });
+  // 각주: [* 내용] → GFM 각주([^n] + 하단 정의)
+  const fns = [];
+  s = s.replace(/\[\*\s*([^\]]+?)\]/g, (_, c) => { const n = fns.length + 1; fns.push(`[^${n}]: ${c.trim()}`); return `[^${n}]`; });
+  if (fns.length) s += "\n\n" + fns.join("\n");
   s = s.replace(/@@CODE(\d+)@@/g, (_, i) => stash[+i]);
   return s;
 }
@@ -551,6 +555,7 @@ function Reader({ doc, docs, favs, toggleFav, onEdit, onDelete, onSelect, onNewB
         {(doc.tags || []).map((t) => <span key={t} style={{ marginLeft: 6, background: "#f1f5f9", padding: "1px 7px", borderRadius: 8, color: "#64748b" }}>#{t}</span>)}
       </div>
       <div style={{ padding: "10px 24px 40px" }}>
+        <NumberedTOC body={doc.body} />
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={comps}>{preprocess(doc.body, docs)}</ReactMarkdown>
       </div>
     </div>
@@ -681,6 +686,42 @@ const CAT_ICON = { 보고: "📊", 근태: "🕐", 재무: "💰", 인사: "👥
 const cycleKo = (c) => ({ daily: "매일", weekly: "매주", monthly: "매월" }[c] || "반복");
 const backBtn  = { border: "1px solid #e2e8f0", background: "#fff", color: "#64748b", borderRadius: 7, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600 };
 const ghostBtn = { border: "1px solid #e2e8f0", background: "#fff", color: "#64748b", borderRadius: 7, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600 };
+
+// ── 나무위키식 번호 목차 (접기) ────────────────────────────────────────────────
+function NumberedTOC({ body }) {
+  const [open, setOpen] = useState(true);
+  const items = useMemo(() => {
+    const raw = [];
+    (body || "").split("\n").forEach((ln) => { const m = ln.match(/^(#{2,4})\s+(.+)/); if (m) raw.push({ lvl: m[1].length, text: m[2].trim() }); }); // h1(제목) 제외
+    const cnt = [0, 0, 0];
+    return raw.map((it) => { const d = it.lvl - 2; cnt[d]++; for (let j = d + 1; j < 3; j++) cnt[j] = 0; return { ...it, num: cnt.slice(0, d + 1).join(".") }; });
+  }, [body]);
+  if (items.length < 2) return null;
+  return (
+    <div style={{ display: "inline-block", minWidth: 220, maxWidth: "100%", border: "1px solid #e2e8f0", borderRadius: 8, background: "#f8fafc", margin: "2px 0 18px", padding: "9px 16px" }}>
+      <div onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: "#475569" }}>
+        <span style={{ fontSize: 10 }}>{open ? "▼" : "▶"}</span>목차 <span style={{ color: "#94a3b8", fontWeight: 400, fontSize: 11 }}>[{open ? "숨기기" : "펼치기"}]</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {items.map((it, i) => (
+            <div key={i} onClick={() => { const el = document.getElementById(slug(it.text)); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+              style={{ fontSize: 12.5, padding: "2px 0", paddingLeft: (it.lvl - 2) * 16, cursor: "pointer", color: "#2563eb" }}>
+              <span style={{ color: "#64748b", marginRight: 6 }}>{it.num}</span>{it.text}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 반복 주기 키 (자동 리셋 판정용)
+function periodKey(cycle, d = new Date()) {
+  if (cycle === "weekly") { const oneJan = new Date(d.getFullYear(), 0, 1); const wk = Math.ceil(((d - oneJan) / 86400000 + oneJan.getDay() + 1) / 7); return d.getFullYear() + "-W" + wk; }
+  if (cycle === "monthly") return d.getFullYear() + "-" + (d.getMonth() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 // ── 사내위키: 나무위키식 대문 ──────────────────────────────────────────────────
 function WikiHome({ wikis, onSelect, onNew, query, setQuery, favs }) {
@@ -840,6 +881,16 @@ function RoutineView({ doc, patchDoc, onEdit, onDelete, onBack }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const r = doc.routine || { cycle: "daily", items: [] };
   const items = r.items || [];
+  // 주기 도래 시 자동 초기화 (열 때 1회 판정)
+  const [autoReset, setAutoReset] = useState(false);
+  useEffect(() => {
+    const cur = periodKey(r.cycle);
+    const last = r.lastReset ? periodKey(r.cycle, new Date(r.lastReset)) : null;
+    if (last !== cur && items.some((i) => i.done)) {
+      patchDoc(doc.id, { routine: { ...r, items: items.map((it) => ({ ...it, done: false })), lastReset: new Date().toISOString() } });
+      setAutoReset(true);
+    }
+  }, [doc.id]); // eslint-disable-line
   const done = items.filter((i) => i.done).length;
   const pct = items.length ? Math.round(done / items.length * 100) : 0;
   const toggle = (idx) => patchDoc(doc.id, { routine: { ...r, items: items.map((it, i) => (i === idx ? { ...it, done: !it.done } : it)) } });
@@ -861,7 +912,7 @@ function RoutineView({ doc, patchDoc, onEdit, onDelete, onBack }) {
       <div style={{ height: 10, background: "#dcfce7", borderRadius: 6, overflow: "hidden", margin: "10px 0 4px", maxWidth: 480 }}>
         <div style={{ height: "100%", width: pct + "%", background: "linear-gradient(90deg,#22c55e,#16a34a)", borderRadius: 6, transition: "width .3s" }} />
       </div>
-      <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 700, marginBottom: 14 }}>{done}/{items.length} 완료 · {pct}%{pct === 100 ? " 🎉 끝!" : ""}</div>
+      <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 700, marginBottom: 14 }}>{done}/{items.length} 완료 · {pct}%{pct === 100 ? " 🎉 끝!" : ""}{autoReset && <span style={{ marginLeft: 8, color: "#0ea5e9", fontWeight: 600 }}>↻ 새 {cycleKo(r.cycle)} 시작 — 자동 초기화됨</span>}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 560 }}>
         {items.map((it, i) => (
           <label key={i} style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 14px", background: "#fff", border: "1px solid " + (it.done ? "#bbf7d0" : "#e2e8f0"), borderRadius: 10, cursor: "pointer" }}>
@@ -876,10 +927,24 @@ function RoutineView({ doc, patchDoc, onEdit, onDelete, onBack }) {
 }
 
 // ── 양식형: 작성법 + 템플릿 다운로드 ────────────────────────────────────────────
-function FormView({ doc, docs, onEdit, onDelete, onBack }) {
+function FormView({ doc, docs, patchDoc, onEdit, onDelete, onBack }) {
   const [confirmDel, setConfirmDel] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef();
   const f = doc.form || {};
   const comps = mdComponents(docs, () => {}, () => {});
+  const upload = async (file) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const r = await fetch(`${API}/api/upload`, { method: "POST", body: fd });
+      const j = await r.json();
+      if (j.ok) patchDoc(doc.id, { form: { ...f, templates: [...(f.templates || []), { name: j.name, url: j.url }] } });
+    } catch {}
+    setUploading(false);
+  };
+  const removeTpl = (i) => patchDoc(doc.id, { form: { ...f, templates: (f.templates || []).filter((_, j) => j !== i) } });
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "20px 26px", background: "#fffbeb" }}>
       <button onClick={onBack} style={backBtn}>← 목록</button>
@@ -894,9 +959,17 @@ function FormView({ doc, docs, onEdit, onDelete, onBack }) {
         </div>
       </div>
       <div style={{ background: "#fff", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px", marginBottom: 14 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309", marginBottom: 8 }}>📎 템플릿</div>
-        {(f.templates || []).length === 0 ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>첨부된 템플릿이 없습니다. ✏ 편집에서 추가하세요.</div>
-          : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{f.templates.map((t, i) => <a key={i} href={t.url} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 6, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "7px 12px", fontSize: 12, color: "#92400e", textDecoration: "none", fontWeight: 600 }}>⤓ {t.name}</a>)}</div>}
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309" }}>📎 템플릿</div>
+          <input ref={fileRef} type="file" style={{ display: "none" }} accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.hwp,.txt,.zip" onChange={(e) => { const file = e.target.files?.[0]; if (file) upload(file); e.target.value = ""; }} />
+          <button onClick={() => fileRef.current?.click()} disabled={uploading} style={{ marginLeft: "auto", background: "#fef3c7", border: "1px solid #fde68a", color: "#92400e", borderRadius: 7, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>{uploading ? "⏳ 업로드중…" : "＋ 템플릿 업로드"}</button>
+        </div>
+        {(f.templates || []).length === 0 ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>아직 템플릿이 없습니다. 위 버튼으로 .docx/.xlsx 등을 올리세요.</div>
+          : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{f.templates.map((t, i) => (
+              <span key={i} style={{ display: "flex", alignItems: "center", gap: 6, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "7px 10px", fontSize: 12, color: "#92400e", fontWeight: 600 }}>
+                <a href={t.url} target="_blank" rel="noreferrer" style={{ color: "#92400e", textDecoration: "none" }}>⤓ {t.name}</a>
+                <span onClick={() => removeTpl(i)} style={{ cursor: "pointer", color: "#d97706" }}>✕</span>
+              </span>))}</div>}
       </div>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px 20px" }}>
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={comps}>{preprocess(doc.body, docs)}</ReactMarkdown>
