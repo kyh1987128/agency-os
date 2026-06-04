@@ -305,6 +305,15 @@ function TaskDetail({ task, proj, human }) {
   // nodeId: allNodes 기반(task.id) 또는 구형(task.id)
   const nodeId = task.id || null;
   const pid    = proj?.id || null;
+  const [memo, setMemo] = useState(task.desc || "");
+  const [memoSaved, setMemoSaved] = useState(false);
+  const saveMemo = async () => {
+    if (!nodeId || !pid) return;
+    try {
+      await fetch(`${API}/api/data/projects/${pid}/nodes/${nodeId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ desc: memo }) });
+      setMemoSaved(true); setTimeout(() => setMemoSaved(false), 1500);
+    } catch {}
+  };
   return (
     <>
       <div style={{ padding: "12px 14px", background: tc + "10", borderRadius: 10, border: "1px solid " + tc + "33", marginBottom: 14 }}>
@@ -333,6 +342,23 @@ function TaskDetail({ task, proj, human }) {
             </div>
           </div>
         </>
+      )}
+
+      {/* 상태·진행 + 메모 (편집 가능) */}
+      {nodeId && pid && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            <span style={{ fontSize: 10, color: tc, background: tc + "18", padding: "3px 10px", borderRadius: 8, fontWeight: 600 }}>{STATUS_LABEL[task.s] || task.s || "—"}</span>
+            {typeof task.progress === "number" && <span style={{ fontSize: 10, color: M, background: B, padding: "3px 10px", borderRadius: 8 }}>진행 {task.progress}%</span>}
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: M, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>메모</div>
+          <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="메모를 입력하세요..." rows={3}
+            style={{ width: "100%", boxSizing: "border-box", border: "1px solid " + BR, borderRadius: 8, padding: "9px 11px", fontSize: 12, color: T, resize: "vertical", outline: "none", fontFamily: "inherit" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+            <button onClick={saveMemo} style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "6px 14px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>메모 저장</button>
+            {memoSaved && <span style={{ fontSize: 11, color: "#16a34a", fontWeight: 600 }}>✓ 저장됨</span>}
+          </div>
+        </div>
       )}
 
       {/* 댓글 섹션 — nodeId와 pid가 모두 있을 때만 표시 */}
