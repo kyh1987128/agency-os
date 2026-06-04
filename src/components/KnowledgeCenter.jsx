@@ -763,37 +763,57 @@ function WikiHome({ wikis, onSelect, onNew, query, setQuery, favs }) {
           </div>
         ) : (
           <>
-            {favDocs.length > 0 && (
-              <div style={{ marginBottom: 10, lineHeight: 2 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", marginRight: 6 }}>⭐ 즐겨찾기</span>
-                {favDocs.map((d) => <span key={d.id} onClick={() => onSelect(d.id)} style={{ fontSize: 12, color: "#4338ca", background: "#eef2ff", padding: "3px 10px", borderRadius: 12, cursor: "pointer", marginRight: 6 }}>📖 {d.title}</span>)}
+            {/* 🌱 처음이세요? 여기부터 */}
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: "#16a34a", marginBottom: 9 }}>🌱 처음이세요? 여기부터</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
+                {[{ icon: "📘", title: "지식센터 사용법", sub: "위키·매뉴얼 쓰는 법" }, { icon: "🏢", title: "회사 소개", sub: "미션·사업·조직" }, { icon: "🤖", title: "AI 사용 범위 정책", sub: "AI를 어디까지 쓰나" }].map((s) => {
+                  const d = wikis.find((x) => x.title === s.title);
+                  return (
+                    <div key={s.title} onClick={() => d && onSelect(d.id)} style={{ display: "flex", alignItems: "center", gap: 11, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 12, padding: "13px 15px", cursor: d ? "pointer" : "default", opacity: d ? 1 : 0.45 }}
+                      onMouseEnter={(e) => { if (d) e.currentTarget.style.boxShadow = "0 4px 14px #16a34a22"; }} onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "none"; }}>
+                      <span style={{ fontSize: 24 }}>{s.icon}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#14532d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</div>
+                        <div style={{ fontSize: 10.5, color: "#16a34a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.sub}</div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            )}
-            <div style={{ marginBottom: 20, lineHeight: 2 }}>
+            </div>
+
+            {/* 🕒 최근 변경 */}
+            <div style={{ marginBottom: 16, lineHeight: 2 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginRight: 6 }}>🕒 최근 변경</span>
               {recent.map((d) => <span key={d.id} onClick={() => onSelect(d.id)} style={{ fontSize: 12, color: "#475569", cursor: "pointer", marginRight: 12 }}>· {d.title} <span style={{ color: "#cbd5e1" }}>{ago(d.updatedAt)}</span></span>)}
             </div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10, borderTop: "1px solid #f1f5f9", paddingTop: 16 }}>분류</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "6px 28px", alignItems: "start" }}>
-              {groups.map(([cat, docs]) => { const c = catColor(cat), open = isOpen(cat);
+
+            {/* 분류 컬러 타일 보드 */}
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12, borderTop: "1px solid #f1f5f9", paddingTop: 16 }}>분류</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 14, alignItems: "start" }}>
+              {groups.map(([cat, docs]) => {
+                const c = catColor(cat), open = openCats[cat] === true, shown = open ? docs : docs.slice(0, 4);
                 return (
-                  <div key={cat} style={{ marginBottom: 8 }}>
-                    <div onClick={() => toggle(cat)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 4px", cursor: "pointer", borderBottom: "1px solid #f1f5f9" }}>
-                      <span style={{ fontSize: 10, color: "#94a3b8", width: 10 }}>{open ? "▾" : "▸"}</span>
-                      <span style={{ width: 8, height: 8, borderRadius: 2, background: c }} />
-                      <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>{CAT_ICON[cat] || "📁"} {cat}</span>
-                      <span style={{ marginLeft: "auto", fontSize: 10, color: "#cbd5e1" }}>{docs.length}</span>
+                  <div key={cat} style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: `3px solid ${c}`, borderRadius: 12, boxShadow: "0 2px 10px #00000010", overflow: "hidden" }}>
+                    <div style={{ padding: "10px 14px", background: c + "0e", display: "flex", alignItems: "center", gap: 7 }}>
+                      <span style={{ fontSize: 16 }}>{CAT_ICON[cat] || "📁"}</span>
+                      <span style={{ fontSize: 13.5, fontWeight: 800, color: "#1e293b" }}>{cat}</span>
+                      <span style={{ marginLeft: "auto", fontSize: 11, color: c, fontWeight: 700, background: "#fff", borderRadius: 10, padding: "1px 9px" }}>{docs.length}</span>
                     </div>
-                    {open && (
-                      <div style={{ padding: "4px 0 6px 24px" }}>
-                        {docs.map((d) => (
-                          <div key={d.id} onClick={() => onSelect(d.id)} style={{ fontSize: 12.5, color: "#475569", padding: "4px 0", cursor: "pointer" }}
-                            onMouseEnter={(e) => (e.currentTarget.style.color = "#4338ca")} onMouseLeave={(e) => (e.currentTarget.style.color = "#475569")}>
-                            <span style={{ color: "#cbd5e1" }}>·</span> {d.title}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <div style={{ padding: "6px 10px 9px" }}>
+                      {shown.map((d) => (
+                        <div key={d.id} onClick={() => onSelect(d.id)} style={{ fontSize: 12.5, color: "#475569", padding: "5px 7px", cursor: "pointer", borderRadius: 6 }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = c + "12"; e.currentTarget.style.color = "#1e293b"; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#475569"; }}>
+                          <span style={{ color: c, marginRight: 4 }}>·</span>{d.title}
+                        </div>
+                      ))}
+                      {docs.length > 4 && (
+                        <div onClick={() => setOpenCats((p) => ({ ...p, [cat]: !p[cat] }))} style={{ fontSize: 11, color: c, fontWeight: 700, cursor: "pointer", padding: "6px 7px" }}>
+                          {open ? "▴ 접기" : `+ ${docs.length - 4}개 더보기 →`}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
