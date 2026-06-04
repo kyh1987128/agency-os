@@ -11,6 +11,7 @@ const TABS = [
   { id: "calendar",  e: "📅", l: "캘린더" },
   { id: "chat",      e: "💬", l: "채팅" },
   { id: "knowledge", e: "📚", l: "지식센터" },
+  { id: "board",     e: "📋", l: "게시판" },
   { id: "archive",   e: "📦", l: "보관함" },
 ];
 

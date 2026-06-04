@@ -7,6 +7,7 @@ import ProjectsView from "./components/ProjectsView";
 import KanbanView from "./components/KanbanView";
 import ChatView from "./components/ChatView";
 import KnowledgeCenter from "./components/KnowledgeCenter";
+import BoardView from "./components/BoardView";
 import GanttView from "./components/GanttView";
 import CalendarView from "./components/CalendarView";
 import ArchiveView from "./components/ArchiveView";
@@ -118,6 +119,14 @@ export default function App() {
             activeProject={activeProject}
             onSendToBot={({ botId, message, label }) => { setChatHandoff({ botId, message, label, nonce: Date.now() }); setTab("chat"); }}
           />
+        </div>
+      ) : tab === "board" ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid " + BR, background: "#ffffff", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: T }}>📋 게시판 <span style={{ fontSize: 10, color: M, fontWeight: 400 }}>· 사내 소통</span></span>
+            <span style={{ fontSize: 10, color: M }}>{new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" })}</span>
+          </div>
+          <BoardView humans={humans} />
         </div>
       ) : tab === "archive" ? (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>

@@ -1686,6 +1686,166 @@ app.get("/api/drive/doc", (req, res) => {
   res.json({ name: d.name, folder: d.folder, type: d.type, text: maskSensitive(d.text || "") });
 });
 
+// ════════════════════════════════════════════════════════════════════════════════
+// 사내 게시판 API
+// ════════════════════════════════════════════════════════════════════════════════
+const boardsPath = () => path.join(DATA_DIR, "boards.json");
+const bPostsPath = () => path.join(DATA_DIR, "board_posts.json");
+const bCommentsPath = () => path.join(DATA_DIR, "board_comments.json");
+const bNotisPath = () => path.join(DATA_DIR, "board_notis.json");
+function loadJSON(p, def) { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return def; } }
+function saveJSON(p, d) { ensureDataDir(); fs.writeFileSync(p, JSON.stringify(d, null, 2), "utf8"); }
+function ensureBoardsSeed() {
+  if (fs.existsSync(boardsPath())) return;
+  const seed = [
+    { id: "notice", name: "공지사항", icon: "📢", color: "#ef4444", group: "소통", type: "post", writePerm: "admin", anonymous: false, mustRead: true, order: 1 },
+    { id: "free", name: "자유게시판", icon: "💬", color: "#6366f1", group: "소통", type: "post", writePerm: "all", anonymous: false, mustRead: false, order: 2 },
+    { id: "suggest", name: "건의·제안", icon: "💡", color: "#f59e0b", group: "소통", type: "post", writePerm: "all", anonymous: true, mustRead: false, order: 3 },
+    { id: "request", name: "업무요청", icon: "🙋", color: "#10b981", group: "업무", type: "request", writePerm: "all", anonymous: false, mustRead: false, order: 4 },
+    { id: "resource", name: "자료공유", icon: "📁", color: "#0ea5e9", group: "자료", type: "post", writePerm: "all", anonymous: false, mustRead: false, order: 5 },
+  ];
+  saveJSON(boardsPath(), seed);
+}
+ensureBoardsSeed();
+function addNoti({ userId, type, postId, boardId, fromName, text }) {
+  if (!userId) return;
+  const notis = loadJSON(bNotisPath(), []);
+  notis.unshift({ id: randomUUID().slice(0, 8), userId, type, postId, boardId, fromName, text, read: false, createdAt: new Date().toISOString() });
+  saveJSON(bNotisPath(), notis.slice(0, 500));
+}
+
+// ── 게시판 CRUD ──
+app.get("/api/boards", (req, res) => res.json(loadJSON(boardsPath(), []).sort((a, b) => (a.order || 0) - (b.order || 0))));
+app.post("/api/boards", (req, res) => {
+  const boards = loadJSON(boardsPath(), []);
+  const { name, icon = "📋", color = "#6366f1", group = "기타", type = "post", writePerm = "all", anonymous = false, mustRead = false } = req.body || {};
+  if (!name) return res.status(400).json({ error: "name required" });
+  const b = { id: randomUUID().slice(0, 8), name, icon, color, group, type, writePerm, anonymous, mustRead, order: boards.length + 1, hidden: false };
+  boards.push(b); saveJSON(boardsPath(), boards); res.json(b);
+});
+app.patch("/api/boards/:id", (req, res) => {
+  const boards = loadJSON(boardsPath(), []);
+  const b = boards.find((x) => x.id === req.params.id);
+  if (!b) return res.status(404).json({ error: "not found" });
+  Object.assign(b, req.body || {}); saveJSON(boardsPath(), boards); res.json(b);
+});
+app.delete("/api/boards/:id", (req, res) => {
+  saveJSON(boardsPath(), loadJSON(boardsPath(), []).filter((b) => b.id !== req.params.id));
+  res.json({ ok: true });
+});
+
+// ── 글 목록 (페이지네이션 + 검색) ──
+app.get("/api/boards/:bid/posts", (req, res) => {
+  const { page = 1, size = 20, q = "" } = req.query;
+  let posts = loadJSON(bPostsPath(), []).filter((p) => p.boardId === req.params.bid);
+  if (q.trim()) { const s = q.trim().toLowerCase(); posts = posts.filter((p) => (`${p.title} ${p.body} ${p.authorName}`).toLowerCase().includes(s)); }
+  posts.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  const pinned = posts.filter((p) => p.pinned);
+  const rest = posts.filter((p) => !p.pinned);
+  const pg = Math.max(1, +page), sz = +size;
+  const pageItems = rest.slice((pg - 1) * sz, pg * sz);
+  const strip = (p) => ({ ...p, body: undefined, commentCount: loadJSON(bCommentsPath(), []).filter((c) => c.postId === p.id).length });
+  res.json({ pinned: pinned.map(strip), posts: pageItems.map(strip), total: rest.length, page: pg, size: sz, pages: Math.ceil(rest.length / sz) });
+});
+
+// ── 글 작성 ──
+app.post("/api/boards/:bid/posts", (req, res) => {
+  const posts = loadJSON(bPostsPath(), []);
+  const boards = loadJSON(boardsPath(), []);
+  const board = boards.find((b) => b.id === req.params.bid);
+  const { title, body = "", authorId, authorName = "익명", authorAvatar = "🧑", anonymous = false, tags = [], attachments = [], driveRefs = [], wikiRefs = [], mentions = [], status = "요청", assignees = [], dueDate = "", priority = "normal" } = req.body || {};
+  if (!title) return res.status(400).json({ error: "title required" });
+  const no = Math.max(0, ...posts.filter((p) => p.boardId === req.params.bid).map((p) => p.no || 0)) + 1;
+  const now = new Date().toISOString();
+  const post = { id: randomUUID().slice(0, 8), no, boardId: req.params.bid, title, body, authorId, authorName: anonymous ? "익명" : authorName, authorAvatar: anonymous ? "🙈" : authorAvatar, anonymous, pinned: false, tags, attachments, driveRefs, wikiRefs, views: 0, likes: [], readBy: [], status, assignees, dueDate, priority, createdAt: now, updatedAt: now };
+  posts.unshift(post); saveJSON(bPostsPath(), posts);
+  // @멘션 알림
+  (mentions || []).forEach((uid) => addNoti({ userId: uid, type: "mention", postId: post.id, boardId: post.boardId, fromName: authorName, text: `${board?.name || ""} "${title}"에서 회원님을 멘션` }));
+  res.json(post);
+});
+
+// ── 글 상세 (조회수++) ──
+app.get("/api/posts/:pid", (req, res) => {
+  const posts = loadJSON(bPostsPath(), []);
+  const post = posts.find((p) => p.id === req.params.pid);
+  if (!post) return res.status(404).json({ error: "not found" });
+  post.views = (post.views || 0) + 1; saveJSON(bPostsPath(), posts);
+  res.json(post);
+});
+app.patch("/api/posts/:pid", (req, res) => {
+  const posts = loadJSON(bPostsPath(), []);
+  const post = posts.find((p) => p.id === req.params.pid);
+  if (!post) return res.status(404).json({ error: "not found" });
+  const { title, body, tags, pinned, attachments, driveRefs, wikiRefs, status, assignees, dueDate, priority } = req.body || {};
+  Object.assign(post, { ...(title !== undefined && { title }), ...(body !== undefined && { body }), ...(tags !== undefined && { tags }), ...(pinned !== undefined && { pinned }), ...(attachments !== undefined && { attachments }), ...(driveRefs !== undefined && { driveRefs }), ...(wikiRefs !== undefined && { wikiRefs }), ...(status !== undefined && { status }), ...(assignees !== undefined && { assignees }), ...(dueDate !== undefined && { dueDate }), ...(priority !== undefined && { priority }), updatedAt: new Date().toISOString() });
+  saveJSON(bPostsPath(), posts); res.json(post);
+});
+app.delete("/api/posts/:pid", (req, res) => {
+  saveJSON(bPostsPath(), loadJSON(bPostsPath(), []).filter((p) => p.id !== req.params.pid));
+  saveJSON(bCommentsPath(), loadJSON(bCommentsPath(), []).filter((c) => c.postId !== req.params.pid));
+  res.json({ ok: true });
+});
+// 좋아요 토글
+app.post("/api/posts/:pid/like", (req, res) => {
+  const posts = loadJSON(bPostsPath(), []); const post = posts.find((p) => p.id === req.params.pid);
+  if (!post) return res.status(404).json({ error: "not found" });
+  const uid = req.body?.userId || "anon";
+  post.likes = post.likes || [];
+  post.likes = post.likes.includes(uid) ? post.likes.filter((x) => x !== uid) : [...post.likes, uid];
+  saveJSON(bPostsPath(), posts); res.json({ likes: post.likes.length, liked: post.likes.includes(uid) });
+});
+// 필독 확인
+app.post("/api/posts/:pid/read", (req, res) => {
+  const posts = loadJSON(bPostsPath(), []); const post = posts.find((p) => p.id === req.params.pid);
+  if (!post) return res.status(404).json({ error: "not found" });
+  const uid = req.body?.userId; post.readBy = post.readBy || [];
+  if (uid && !post.readBy.includes(uid)) post.readBy.push(uid);
+  saveJSON(bPostsPath(), posts); res.json({ readBy: post.readBy });
+});
+
+// ── 댓글 ──
+app.get("/api/posts/:pid/comments", (req, res) => res.json(loadJSON(bCommentsPath(), []).filter((c) => c.postId === req.params.pid).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""))));
+app.post("/api/posts/:pid/comments", (req, res) => {
+  const comments = loadJSON(bCommentsPath(), []);
+  const posts = loadJSON(bPostsPath(), []); const post = posts.find((p) => p.id === req.params.pid);
+  const { body, authorId, authorName = "익명", authorAvatar = "🧑", parentId = null, mentions = [] } = req.body || {};
+  if (!body) return res.status(400).json({ error: "body required" });
+  const c = { id: randomUUID().slice(0, 8), postId: req.params.pid, parentId, body, authorId, authorName, authorAvatar, likes: [], createdAt: new Date().toISOString() };
+  comments.push(c); saveJSON(bCommentsPath(), comments);
+  // 글쓴이에게 알림 (본인 제외)
+  if (post && post.authorId && post.authorId !== authorId) addNoti({ userId: post.authorId, type: "comment", postId: post.id, boardId: post.boardId, fromName: authorName, text: `"${post.title}"에 댓글: ${body.slice(0, 30)}` });
+  (mentions || []).forEach((uid) => uid !== authorId && addNoti({ userId: uid, type: "mention", postId: req.params.pid, boardId: post?.boardId, fromName: authorName, text: `댓글에서 회원님을 멘션: ${body.slice(0, 30)}` }));
+  res.json(c);
+});
+app.delete("/api/comments/:cid", (req, res) => {
+  saveJSON(bCommentsPath(), loadJSON(bCommentsPath(), []).filter((c) => c.id !== req.params.cid));
+  res.json({ ok: true });
+});
+
+// ── 알림 ──
+app.get("/api/notifications/:userId", (req, res) => res.json(loadJSON(bNotisPath(), []).filter((n) => n.userId === req.params.userId).slice(0, 50)));
+app.post("/api/notifications/:userId/read", (req, res) => {
+  const notis = loadJSON(bNotisPath(), []);
+  notis.forEach((n) => { if (n.userId === req.params.userId) n.read = true; });
+  saveJSON(bNotisPath(), notis); res.json({ ok: true });
+});
+
+// ── 링크 미리보기 (OG 태그) ──
+app.get("/api/link-preview", async (req, res) => {
+  const url = req.query.url;
+  if (!url || !/^https?:\/\//.test(url)) return res.status(400).json({ error: "invalid url" });
+  if (/localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\./.test(url)) return res.status(400).json({ error: "blocked" });
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": "Mozilla/5.0 AgencyOS-LinkPreview" } });
+    clearTimeout(t);
+    const html = (await r.text()).slice(0, 200000);
+    const meta = (prop) => { const m = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=["']([^"']+)["']`, "i")) || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${prop}["']`, "i")); return m ? m[1] : ""; };
+    const title = meta("og:title") || (html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || "").trim();
+    res.json({ url, title: title.slice(0, 120), description: (meta("og:description") || meta("description")).slice(0, 200), image: meta("og:image"), site: meta("og:site_name") });
+  } catch (e) { res.json({ url, title: url, description: "", image: "", site: "" }); }
+});
+
 // ── SSE 브로드캐스트 스트림 ───────────────────────────────────────────────────
 app.get("/api/stream", (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
