@@ -80,8 +80,18 @@ function nodesToEvents(nodes, projData, departments, humans) {
 }
 
 /* 이벤트 카드 */
-function EventCard({ event }) {
+function EventCard({ event, view }) {
   const { color, proj, assigneeHumans, departments } = event.resource;
+
+  // 월뷰: 한 줄 컴팩트(제목만) — 하루에 여러 개 누적돼도 글자 안 찌그러짐
+  if (view === "month") {
+    const p = pastel(color);
+    return (
+      <div className="cal-month-card" style={{ background:p.bg, border:`1px solid ${p.border}`, borderRadius:4, padding:"0 7px", height:"100%", display:"flex", alignItems:"center", overflow:"hidden" }}>
+        <span style={{ fontSize:11, fontWeight:700, color:p.title, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", lineHeight:1.4, letterSpacing:"-0.01em" }}>{event.title}</span>
+      </div>
+    );
+  }
 
   // allDay (종일/기간/마감일 마커) — 행 높이에 맞춰 제목+상세 표시, 좁아지면 자동 축소(overflow:hidden)
   if (event.allDay) {
@@ -890,7 +900,7 @@ export default function CalendarView({ allNodes=[], projData=[], departments=[],
               eventPropGetter={() => ({ style:{ background:"transparent", border:"none", padding:0 } })}
               components={{
                 toolbar: EmptyToolbar,
-                event:   EventCard,
+                event:   (props) => <EventCard {...props} view={view} />,
                 header:  DayColumnHeader,
                 month: {
                   dateHeader: MonthDateHeader,
