@@ -169,8 +169,17 @@ export default function ChatView({ activeProject = "default" }) {
 
   const cur = BOT_MAP[activeBot];
 
-  // ── 코크핏: 마지막 봇 산출물 ──
-  const lastBotMsg = [...msgs].reverse().find((m) => m.role !== "user" && (m.content || "").trim() && !m.isStreaming);
+  // ── 코크핏: 마지막 봇 "산출물" (질문/군더더기 메시지는 제외) ──
+  // 마지막 메시지가 "내용을 붙여넣어 주세요" 같은 되묻기면 산출물이 아니므로 건너뛴다.
+  const isDeliverable = (c) => {
+    const s = (c || "").trim();
+    if (s.length < 60) return false;                 // 너무 짧으면 결과물 아님
+    if (/[?？]\s*$/.test(s)) return false;             // 질문으로 끝나면 제외
+    if (/(붙여넣|입력해\s*주세요|적어\s*주세요|무엇부터|고민\s*중|알려\s*주시면|준비.*되[셨시])/.test(s)) return false; // 되묻기 패턴
+    return true;
+  };
+  const botMsgs = [...msgs].reverse().filter((m) => m.role !== "user" && !m.isStreaming && (m.content || "").trim());
+  const lastBotMsg = botMsgs.find((m) => isDeliverable(m.content)) || botMsgs[0]; // 없으면 마지막 봇 메시지로 폴백
   const artifact = lastBotMsg?.content || "";
   const artifactTitle = (() => {
     if (!artifact) return "";
@@ -254,7 +263,7 @@ export default function ChatView({ activeProject = "default" }) {
     setPendingHandoff({
       bot: targetBot,
       text: `다음은 '${cur.name}'의 결과물입니다. 이어서 작업해 주세요.\n\n${artifact}`,
-      label: `↪ ${cur.name} → ${BOT_MAP[targetBot]?.name || "봇"} 인계`,
+      label: `↪ ${cur.name} → ${BOT_MAP[targetBot]?.name || "봇"} 인계\n📎 전달: "${artifactTitle}"`,
     });
     setCockpitTab("guide");
     setActiveBot(targetBot);
@@ -487,6 +496,7 @@ export default function ChatView({ activeProject = "default" }) {
               <Section title="📊 진행 단계">
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <span style={{ fontSize: 11, color: "#475569", fontWeight: 700 }}>{cur.name}</span>
+                  <span style={{ fontSize: 9, color: "#cbd5e1" }}>· 대화 기반 추정</span>
                   <span style={{ marginLeft: "auto", fontSize: 10, color: "#6366f1", fontWeight: 700 }}>{progress}%</span>
                 </div>
                 <div style={{ height: 5, background: "#eef2ff", borderRadius: 3, marginBottom: 10, overflow: "hidden" }}>
