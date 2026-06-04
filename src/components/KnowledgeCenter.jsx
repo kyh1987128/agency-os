@@ -1,8 +1,10 @@
-import { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
+import { useState, useEffect, useMemo, useRef, useLayoutEffect, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import MiniSearch from "minisearch";
+import { ReactFlow, Background, Controls, MiniMap, Handle, Position } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 
 const API = "";
 
@@ -128,86 +130,96 @@ export default function KnowledgeCenter({ humans = [], activeProject = "default"
   );
 }
 
-// ── 위키 구역 지도 (B안) ───────────────────────────────────────────────────────
-function ZoneMap({ wikis, onSelect, onNew, favs, toggleFav, query }) {
-  const contentRef = useRef(null);
-  const [lines, setLines] = useState([]);
+// ── 위키 지식 지도 (React Flow 그래프) ─────────────────────────────────────────
+const DocNode = memo(({ data }) => {
+  const c = data.color;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 13px", background: "#fff", border: `2px solid ${c}`, borderRadius: 22, boxShadow: `0 2px 10px ${c}33`, cursor: "pointer", maxWidth: 200 }}>
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
+      <span style={{ width: 9, height: 9, borderRadius: "50%", background: c, flexShrink: 0 }} />
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📖 {data.label}</span>
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+    </div>
+  );
+});
+const CatNode = memo(({ data }) => (
+  <div style={{ fontSize: 14, fontWeight: 900, color: data.color, letterSpacing: 1, opacity: 0.55, pointerEvents: "none" }}>
+    ◆ {data.label}
+  </div>
+));
+const wikiNodeTypes = { doc: DocNode, cat: CatNode };
 
-  const zones = useMemo(() => {
-    const m = {};
-    wikis.forEach((d) => { (m[d.category || "미분류"] ||= []).push(d); });
-    return Object.entries(m).map(([cat, docs]) => ({ cat, docs }));
-  }, [wikis]);
-
-  // [[문서]] 링크 → 보이는 문서끼리 연결 엣지
-  const edges = useMemo(() => {
-    const byTitle = {}; wikis.forEach((d) => { byTitle[d.title] = d.id; });
-    const es = [];
-    wikis.forEach((d) => {
-      const found = new Set();
-      (d.body || "").replace(/\[\[([^\]|#]+)(?:#[^\]]+)?\]\]/g, (_, t) => { const id = byTitle[t.trim()]; if (id && id !== d.id) found.add(id); return ""; });
-      found.forEach((to) => es.push({ from: d.id, to, key: d.id + "-" + to }));
+function ZoneMap({ wikis, onSelect, onNew, query }) {
+  const { nodes, edges, cats } = useMemo(() => {
+    const byCat = {};
+    wikis.forEach((d) => { (byCat[d.category || "미분류"] ||= []).push(d); });
+    const catList = Object.keys(byCat);
+    const cols = Math.max(1, Math.ceil(Math.sqrt(catList.length)));
+    const GAPX = 520, GAPY = 460;
+    const nodes = [];
+    catList.forEach((cat, ci) => {
+      const cx = (ci % cols) * GAPX + 260;
+      const cy = Math.floor(ci / cols) * GAPY + 200;
+      const c = catColor(cat);
+      // 카테고리 라벨 노드(중앙, 배경처럼)
+      nodes.push({ id: `cat:${cat}`, type: "cat", position: { x: cx - 30, y: cy - 120 }, data: { label: cat, color: c }, draggable: false, selectable: false });
+      const list = byCat[cat];
+      list.forEach((d, i) => {
+        const k = list.length;
+        const ang = (i / Math.max(k, 1)) * Math.PI * 2 - Math.PI / 2;
+        const rad = k === 1 ? 0 : 90 + k * 16;
+        nodes.push({ id: d.id, type: "doc", position: { x: cx + Math.cos(ang) * rad, y: cy + Math.sin(ang) * rad }, data: { label: d.title, color: c } });
+      });
     });
-    return es;
+    // [[링크]] 엣지
+    const byTitle = {}; wikis.forEach((d) => { byTitle[d.title] = d.id; });
+    const edges = [];
+    wikis.forEach((d) => {
+      const seen = new Set();
+      (d.body || "").replace(/\[\[([^\]|#]+)(?:#[^\]]+)?\]\]/g, (_, t) => {
+        const id = byTitle[t.trim()];
+        if (id && id !== d.id && !seen.has(id)) { seen.add(id); edges.push({ id: `${d.id}-${id}`, source: d.id, target: id, style: { stroke: "#a5b4fc", strokeWidth: 2 }, animated: true }); }
+        return "";
+      });
+    });
+    return { nodes, edges, cats: catList };
   }, [wikis]);
-
-  // 카드 중심 좌표 측정 → 연결선
-  useLayoutEffect(() => {
-    const measure = () => {
-      const content = contentRef.current; if (!content) return;
-      const cr = content.getBoundingClientRect();
-      const center = (id) => { const el = content.querySelector(`[data-doc="${id}"]`); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left - cr.left + r.width / 2, y: r.top - cr.top + r.height / 2 }; };
-      const ls = [];
-      edges.forEach((e) => { const a = center(e.from), b = center(e.to); if (a && b) ls.push({ a, b, key: e.key }); });
-      setLines(ls);
-    };
-    const raf = requestAnimationFrame(measure);
-    const ro = new ResizeObserver(measure); if (contentRef.current) ro.observe(contentRef.current);
-    window.addEventListener("resize", measure);
-    return () => { cancelAnimationFrame(raf); ro.disconnect(); window.removeEventListener("resize", measure); };
-  }, [edges, zones]);
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#f8fafc" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 20px 8px", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 15, fontWeight: 800, color: "#1e293b" }}>🗺️ 사내위키 지도</span>
-        <span style={{ fontSize: 11, color: "#94a3b8" }}>구역=분야 · 선=문서 연결 · 클릭하면 열려요</span>
-        <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ 새 위키</button>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, position: "relative", background: "#f8fafc" }}>
+      {/* 헤더 (오버레이) */}
+      <div style={{ position: "absolute", top: 10, left: 16, right: 16, zIndex: 5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", pointerEvents: "none" }}>
+        <span style={{ fontSize: 15, fontWeight: 800, color: "#1e293b", background: "#ffffffcc", padding: "3px 8px", borderRadius: 8, pointerEvents: "auto" }}>🗺️ 사내위키 지식 지도</span>
+        <span style={{ fontSize: 11, color: "#64748b", background: "#ffffffcc", padding: "3px 8px", borderRadius: 8 }}>드래그로 이동 · 휠로 확대/축소 · 점 클릭 → 문서</span>
+        <button onClick={onNew} style={{ marginLeft: "auto", pointerEvents: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", boxShadow: "0 2px 8px #6366f155" }}>+ 새 위키</button>
       </div>
-      <div style={{ flex: 1, overflow: "auto", padding: "8px 20px 28px", minHeight: 0 }}>
-        <div ref={contentRef} style={{ position: "relative", minHeight: "100%" }}>
-          <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 0, overflow: "visible" }}>
-            {lines.map((l) => (
-              <path key={l.key} d={`M ${l.a.x} ${l.a.y} C ${(l.a.x + l.b.x) / 2} ${l.a.y}, ${(l.a.x + l.b.x) / 2} ${l.b.y}, ${l.b.x} ${l.b.y}`} fill="none" stroke="#c7d2fe" strokeWidth="1.5" strokeDasharray="4 3" />
-            ))}
-          </svg>
-          <div style={{ position: "relative", zIndex: 1, display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
-            {zones.length === 0 && <div style={{ color: "#cbd5e1", fontSize: 13, padding: 30 }}>{query ? "검색 결과 없음" : "위키가 없습니다. + 새 위키로 시작하세요."}</div>}
-            {zones.map((z) => {
-              const c = catColor(z.cat);
-              return (
-                <div key={z.cat} style={{ width: 232, background: "#fff", border: `1px solid ${c}33`, borderTop: `3px solid ${c}`, borderRadius: 12, boxShadow: "0 2px 10px #00000010", overflow: "hidden" }}>
-                  <div style={{ padding: "8px 12px", background: c + "12", fontSize: 12, fontWeight: 800, color: c, display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 3, background: c }} />{z.cat}
-                    <span style={{ marginLeft: "auto", fontSize: 10, color: c, opacity: 0.7 }}>{z.docs.length}</span>
-                  </div>
-                  <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                    {z.docs.map((d) => (
-                      <div key={d.id} data-doc={d.id} onClick={() => onSelect(d.id)}
-                        style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 10px", border: "1px solid #eef2ff", borderRadius: 9, cursor: "pointer", background: "#fbfcff" }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = c + "12"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = "#fbfcff"; }}>
-                        <span style={{ fontSize: 14 }}>📖</span>
-                        <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</span>
-                        <span onClick={(e) => { e.stopPropagation(); toggleFav(d.id); }} style={{ fontSize: 12, color: favs.includes(d.id) ? "#f59e0b" : "#e2e8f0" }}>{favs.includes(d.id) ? "⭐" : "☆"}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {/* 범례 */}
+      {cats.length > 0 && (
+        <div style={{ position: "absolute", bottom: 14, left: 16, zIndex: 5, display: "flex", flexWrap: "wrap", gap: 8, background: "#ffffffdd", padding: "7px 10px", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+          {cats.map((cat) => (
+            <span key={cat} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#475569", fontWeight: 600 }}>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: catColor(cat) }} />{cat}
+            </span>
+          ))}
         </div>
+      )}
+      {wikis.length === 0 && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 4, color: "#94a3b8", fontSize: 13 }}>
+          {query ? "검색 결과 없음" : "위키가 없습니다. + 새 위키로 시작하세요."}
+        </div>
+      )}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <ReactFlow
+          nodes={nodes} edges={edges} nodeTypes={wikiNodeTypes}
+          onNodeClick={(_, node) => { if (node.type === "doc") onSelect(node.id); }}
+          fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2.5}
+          proOptions={{ hideAttribution: true }} nodesConnectable={false}
+          style={{ background: "#f8fafc" }}
+        >
+          <Background color="#dbe3ef" gap={24} size={1.4} />
+          <Controls showInteractive={false} />
+          <MiniMap nodeColor={(n) => n.data?.color || "#94a3b8"} nodeStrokeWidth={2} pannable zoomable style={{ background: "#fff", border: "1px solid #e2e8f0" }} />
+        </ReactFlow>
       </div>
     </div>
   );
