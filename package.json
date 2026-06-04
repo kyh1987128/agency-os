@@ -14,6 +14,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@xyflow/react": "^12.10.2",
+    "adm-zip": "^0.5.17",
     "cors": "^2.8.6",
     "d3": "^7.9.0",
     "date-fns": "^4.3.0",
@@ -34,7 +35,8 @@
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "three": "^0.184.0",
-    "uuid": "^14.0.0"
+    "uuid": "^14.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

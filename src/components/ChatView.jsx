@@ -61,6 +61,7 @@ export default function ChatView({ activeProject = "default", handoff = null }) 
   const [checkedQ, setCheckedQ] = useState({});            // 품질체크 토글 {`${bot}:${i}`:true}
   const [wikiDocs, setWikiDocs] = useState([]);            // 사내위키 문서 (근거 탭)
   const [wikiQuery, setWikiQuery] = useState("");
+  const [driveResults, setDriveResults] = useState([]);    // 회사 드라이브 검색결과 (근거 탭)
   const fileInputRef = useRef(null);
   const bottomRef = useRef(null);
   const activeBotRef = useRef(activeBot);
@@ -317,6 +318,30 @@ export default function ChatView({ activeProject = "default", handoff = null }) 
     const q = input.trim() || "이 사내 자료를 참고해서 지금 업무에 어떻게 활용하면 좋을지 알려줘.";
     setInput("");
     sendMessage(`아래 사내 문서를 근거로 답해줘.\n\n# ${d.title}\n${body}\n\n[요청] ${q}`, `📖 위키 "${d.title}" 참조 · ${q}`);
+  };
+  // 회사 드라이브 검색 (근거 탭 — 검색어 입력 시)
+  useEffect(() => {
+    if (cockpitTab !== "evidence") return;
+    const q = wikiQuery.trim();
+    if (q.length < 2) { setDriveResults([]); return; }
+    const t = setTimeout(() => {
+      fetch(`${API}/api/drive/search?q=${encodeURIComponent(q)}&limit=8`).then((r) => r.json()).then((d) => setDriveResults(Array.isArray(d) ? d : [])).catch(() => {});
+    }, 350);
+    return () => clearTimeout(t);
+  }, [wikiQuery, cockpitTab]); // eslint-disable-line
+  // 드라이브 문서를 근거로 묻기 (본문 있으면 주입, 없으면 위치 안내)
+  const askWithDriveDoc = async (f) => {
+    const q = input.trim() || "이 회사 자료를 참고해 지금 업무에 활용하는 법을 알려줘.";
+    setInput("");
+    if (f.hasText) {
+      try {
+        const r = await fetch(`${API}/api/drive/doc?id=${encodeURIComponent(f.id)}`);
+        const d = await r.json();
+        sendMessage(`아래 회사 문서를 근거로 답해줘.\n\n# ${d.name}\n${(d.text || "").slice(0, 6000)}\n\n[요청] ${q}`, `📁 회사문서 "${f.name}" 참조 · ${q}`);
+      } catch { flash("문서 불러오기 실패"); }
+    } else {
+      sendMessage(`회사 드라이브의 "${f.name}" (위치: ${f.folder || "루트"}) 파일에 대해, 파일명·위치를 근거로 ${q}`, `📁 "${f.name}" 위치 참조`);
+    }
   };
   // 현재 산출물을 사내위키에 새 문서로 저장 (채팅 → 위키)
   const saveToWiki = async () => {
@@ -670,7 +695,29 @@ export default function ChatView({ activeProject = "default", handoff = null }) 
               </div>
             ))}
             {wikiQuery && wikiResults.length === 0 && wikiDocs.length > 0 && (
-              <div style={{ fontSize: 11, color: "#cbd5e1", textAlign: "center", padding: "16px 0" }}>검색 결과 없음</div>
+              <div style={{ fontSize: 11, color: "#cbd5e1", textAlign: "center", padding: "10px 0" }}>위키 결과 없음</div>
+            )}
+
+            {/* 회사 드라이브 문서 */}
+            {wikiQuery.trim().length >= 2 && (
+              <>
+                <div style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, margin: "14px 0 8px", display: "flex", alignItems: "center", gap: 5 }}>
+                  📁 회사 드라이브 {driveResults.length > 0 && <span style={{ color: "#cbd5e1" }}>({driveResults.length})</span>}
+                </div>
+                {driveResults.length === 0 && <div style={{ fontSize: 11, color: "#cbd5e1", textAlign: "center", padding: "8px 0" }}>일치하는 회사 문서 없음</div>}
+                {driveResults.map((f) => (
+                  <div key={f.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#fff" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                      <span>{f.type === "image" ? "🖼" : f.type === "video" ? "🎬" : "📄"}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                    </div>
+                    <div style={{ fontSize: 9.5, color: "#94a3b8", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.folder}>📂 {f.folder || "루트"}</div>
+                    {f.hasText
+                      ? <button disabled={isTyping} onClick={() => askWithDriveDoc(f)} style={{ ...cock(isTyping), width: "100%", background: isTyping ? "#f8fafc" : "#ecfdf5", borderColor: "#a7f3d0", color: isTyping ? "#94a3b8" : "#047857", fontWeight: 700 }}>🤖 이 문서로 묻기</button>
+                      : <div style={{ fontSize: 10, color: "#94a3b8", textAlign: "center", padding: "4px 0" }}>위치만 색인됨 (내용 X)</div>}
+                  </div>
+                ))}
+              </>
             )}
           </div>
         )}

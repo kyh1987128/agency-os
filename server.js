@@ -12,6 +12,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import multer from "multer";
 import { randomUUID } from "crypto";
+import MiniSearch from "minisearch";
 
 // .env 로드 (Dify API 키 등) — Node 20.12+ 내장. 없으면 무시.
 try { process.loadEnvFile(); } catch {}
@@ -910,8 +911,11 @@ app.post("/api/projects/:pid/chat", (req, res) => {
 
   const targetChannel = channel || channelName || bot || "general";
   // 첨부파일 본문을 질문에 주입(모든 봇 공통) + Dify 파일포맷 정리
-  const injectedMessage = buildQueryWithFiles(message, files);
+  let injectedMessage = buildQueryWithFiles(message, files);
   const difyFiles = toDifyFiles(files);
+  // 회사 드라이브 지식 자동 참조 (관련 문서 본문을 컨텍스트로 주입)
+  const driveCtx = searchDriveForChat(message);
+  if (driveCtx) injectedMessage = `[참고할 회사 자료]\n${driveCtx}\n----------\n위 회사 자료를 우선 근거로, 다음 질문에 답하세요.\n\n${injectedMessage}`;
 
   // 통합 디렉터 (오케스트레이터): 여러 전문봇을 조율
   if (bot === "team" || channel === "team") {
@@ -1449,10 +1453,51 @@ async function extractFileText(buffer, filename = "", mimetype = "") {
       const r = await mammoth.extractRawText({ buffer });
       return clip(r.value || "");
     }
+    // PPTX (슬라이드 텍스트)
+    if (ext === "pptx" || mt.includes("presentationml")) {
+      const AdmZip = (await import("adm-zip")).default;
+      const zip = new AdmZip(buffer);
+      let out = "";
+      zip.getEntries()
+        .filter((e) => /ppt\/slides\/slide\d+\.xml$/.test(e.entryName))
+        .sort((a, b) => a.entryName.localeCompare(b.entryName, undefined, { numeric: true }))
+        .forEach((e) => {
+          const xml = e.getData().toString("utf8");
+          const m = xml.match(/<a:t>([^<]*)<\/a:t>/g) || [];
+          out += m.map((x) => x.replace(/<[^>]+>/g, "")).join(" ") + "\n";
+        });
+      return clip(out);
+    }
+    // XLSX / XLS (시트 → CSV)
+    if (["xlsx", "xls"].includes(ext) || mt.includes("spreadsheetml") || mt.includes("ms-excel")) {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(buffer, { type: "buffer" });
+      let out = "";
+      wb.SheetNames.forEach((n) => { out += `# ${n}\n` + XLSX.utils.sheet_to_csv(wb.Sheets[n]) + "\n"; });
+      return clip(out);
+    }
+    // HWPX (한글 신형식, XML zip)
+    if (ext === "hwpx") {
+      const AdmZip = (await import("adm-zip")).default;
+      const zip = new AdmZip(buffer);
+      let out = "";
+      zip.getEntries()
+        .filter((e) => /Contents\/section\d+\.xml$/i.test(e.entryName))
+        .forEach((e) => { out += e.getData().toString("utf8").replace(/<[^>]+>/g, " ") + "\n"; });
+      return clip(out.replace(/\s+/g, " "));
+    }
+    // HWP (한글 바이너리 — PrvText 미리보기 텍스트 사용)
+    if (ext === "hwp") {
+      const XLSX = await import("xlsx");
+      const cfb = XLSX.CFB.read(buffer, { type: "buffer" });
+      const i = cfb.FullPaths.findIndex((p) => /PrvText$/i.test(p));
+      if (i >= 0) return clip(Buffer.from(cfb.FileIndex[i].content).toString("utf16le").replace(/\0/g, "").trim());
+      return "";
+    }
   } catch (e) {
     console.error("[extractFileText]", filename, e.message);
   }
-  return ""; // 미지원(.hwp, .xlsx, 이미지 등) → 빈 문자열 (Dify 파일 첨부로 폴백)
+  return ""; // 미지원(.doc/.ppt 구형, 이미지 등) → 빈 문자열 (위치/Dify 폴백)
 }
 function clip(s) {
   s = (s || "").trim();
@@ -1507,6 +1552,106 @@ app.post("/api/dify-upload", memUpload.single("file"), async (req, res) => {
     textLen: text.length,
     extracted: text.length > 0, // 텍스트 추출 성공 여부
   });
+});
+
+// ── 회사 드라이브 지식 색인 (구글드라이브 동기화 폴더) — 키워드 검색 ────────────────
+// 문서: 본문 추출 색인 / 이미지·영상: 파일명·폴더 위치 색인. 임베딩·외부호출 없음(무료).
+// 색인 소스(여러 곳 가능): 구글드라이브 + S드라이브 등
+const DRIVE_SOURCES = [
+  { label: "구글드라이브", root: process.env.DRIVE_KNOWLEDGE_DIR || "G:\\내 드라이브\\콘텐츠잇다" },
+  { label: "S드라이브", root: "S:\\콘텐츠잇다 주요 파일" },
+];
+const DRIVE_SKIP_DIRS = new Set(["$RECYCLE.BIN", "System Volume Information", "Recovery", ".Encrypted", ".shortcut-targets-by-id"]);
+const DRIVE_INDEX_PATH = path.join(DATA_DIR, "drive_index.json");
+const DRIVE_DOC_EXT = new Set(["pdf", "docx", "txt", "md", "csv", "pptx", "xlsx", "xls", "hwp", "hwpx"]); // 본문 추출
+const DRIVE_IMG = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "heic", "bmp", "tif", "tiff"]);
+const DRIVE_VID = new Set(["mp4", "mov", "avi", "mkv", "webm", "wmv", "m4v"]);
+const DRIVE_META_EXT = new Set(["doc", "ppt", ...DRIVE_IMG, ...DRIVE_VID]); // 구형 바이너리·미디어 = 위치만
+let driveIndex = [];
+let driveMini = null;
+let driveStatus = { state: "idle", scanned: 0, withText: 0, total: 0, startedAt: null, finishedAt: null, sources: DRIVE_SOURCES.map((s) => s.root) };
+
+function driveTypeOf(ext) { if (DRIVE_IMG.has(ext)) return "image"; if (DRIVE_VID.has(ext)) return "video"; return "doc"; }
+function buildDriveMini() {
+  driveMini = new MiniSearch({ fields: ["name", "folder", "text"], storeFields: ["name", "folder", "path", "type", "mtime"], searchOptions: { boost: { name: 3, folder: 1.5 }, prefix: true, fuzzy: 0.2 } });
+  driveMini.addAll(driveIndex);
+}
+function loadDriveIndex() {
+  try { driveIndex = JSON.parse(fs.readFileSync(DRIVE_INDEX_PATH, "utf8")); buildDriveMini(); driveStatus.total = driveIndex.length; driveStatus.state = "done"; console.log(`[drive] 색인 로드: ${driveIndex.length}건`); }
+  catch { driveIndex = []; }
+}
+async function reindexDrive({ limit = 0, subdir = "" } = {}) {
+  if (driveStatus.state === "running") return driveStatus;
+  const sources = subdir
+    ? [{ label: DRIVE_SOURCES[0].label, root: path.join(DRIVE_SOURCES[0].root, subdir), base: DRIVE_SOURCES[0].root }]
+    : DRIVE_SOURCES.map((s) => ({ label: s.label, root: s.root, base: s.root }));
+  driveStatus = { state: "running", scanned: 0, withText: 0, total: 0, startedAt: new Date().toISOString(), finishedAt: null, sources: sources.map((s) => s.root) };
+  const idx = [];
+  let id = 0;
+  const walk = async (dir, src) => {
+    if (limit && idx.length >= limit) return;
+    let entries; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (limit && idx.length >= limit) return;
+      if (e.name.startsWith(".") || DRIVE_SKIP_DIRS.has(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { await walk(full, src); continue; }
+      const ext = (e.name.split(".").pop() || "").toLowerCase();
+      if (!DRIVE_DOC_EXT.has(ext) && !DRIVE_META_EXT.has(ext)) continue;
+      let stat; try { stat = fs.statSync(full); } catch { continue; }
+      const rel = path.relative(src.base, dir);
+      const rec = { id: id++, path: full, name: e.name, folder: `${src.label}${rel ? "/" + rel : ""}`, source: src.label, type: driveTypeOf(ext), mtime: stat.mtime.toISOString(), size: stat.size, text: "" };
+      if (DRIVE_DOC_EXT.has(ext) && stat.size < 50 * 1024 * 1024) {
+        try { const buf = await fs.promises.readFile(full); rec.text = await extractFileText(buf, e.name, ""); if (rec.text) driveStatus.withText++; } catch {}
+      }
+      idx.push(rec);
+      driveStatus.scanned = idx.length;
+      // 중간 저장 + 부분 색인 반영(긴 작업 견고화 / 진행 중에도 검색 가능)
+      if (idx.length % 100 === 0) {
+        driveIndex = idx.slice();
+        try { fs.writeFileSync(DRIVE_INDEX_PATH, JSON.stringify(idx)); } catch {}
+        try { buildDriveMini(); } catch {}
+      }
+    }
+  };
+  try { for (const src of sources) await walk(src.root, src); } catch (e) { console.error("[drive] walk err", e.message); }
+  driveIndex = idx;
+  try { fs.writeFileSync(DRIVE_INDEX_PATH, JSON.stringify(idx)); } catch (e) { console.error("[drive] save err", e.message); }
+  buildDriveMini();
+  driveStatus.state = "done"; driveStatus.total = idx.length; driveStatus.finishedAt = new Date().toISOString();
+  console.log(`[drive] 색인 완료: ${idx.length}건 (본문추출 ${driveStatus.withText})`);
+  return driveStatus;
+}
+// 채팅 시 질문과 관련된 회사 문서 본문을 찾아 컨텍스트로 반환(상위 2건)
+function searchDriveForChat(query) {
+  if (!driveMini || !query || query.trim().length < 6) return "";
+  let hits; try { hits = driveMini.search(query); } catch { return ""; }
+  const docHits = hits.filter((h) => { const d = driveIndex[h.id]; return d && d.type === "doc" && d.text; }).slice(0, 2);
+  if (!docHits.length) return "";
+  let ctx = "";
+  for (const h of docHits) { const d = driveIndex[h.id]; ctx += `\n[회사문서: ${d.name}${d.folder ? ` (${d.folder})` : ""}]\n${(d.text || "").slice(0, 2500)}\n`; }
+  return ctx.trim();
+}
+loadDriveIndex();
+
+app.post("/api/drive/reindex", (req, res) => {
+  if (driveStatus.state === "running") return res.json({ ok: false, status: driveStatus });
+  const { limit = 0, subdir = "" } = req.body || {};
+  reindexDrive({ limit: +limit || 0, subdir });          // 비동기 — 기다리지 않음
+  res.json({ ok: true, started: true, sources: DRIVE_SOURCES.map((s) => s.root) });
+});
+app.get("/api/drive/status", (req, res) => res.json(driveStatus));
+app.get("/api/drive/search", (req, res) => {
+  const q = (req.query.q || "").trim(); const limit = +(req.query.limit || 10);
+  if (!driveMini || !q) return res.json([]);
+  let hits; try { hits = driveMini.search(q); } catch { hits = []; }
+  res.json(hits.slice(0, limit).map((h) => { const d = driveIndex[h.id] || {}; return { id: h.id, name: d.name, folder: d.folder, path: d.path, type: d.type, mtime: d.mtime, hasText: !!d.text, snippet: (d.text || "").slice(0, 160) }; }));
+});
+// 드라이브 문서 전체 본문 (근거 탭에서 클릭 시 주입용)
+app.get("/api/drive/doc", (req, res) => {
+  const d = driveIndex.find((x) => String(x.id) === String(req.query.id) || x.path === req.query.path);
+  if (!d) return res.status(404).json({ error: "not found" });
+  res.json({ name: d.name, folder: d.folder, type: d.type, text: d.text || "" });
 });
 
 // ── SSE 브로드캐스트 스트림 ───────────────────────────────────────────────────
