@@ -1562,6 +1562,11 @@ const DRIVE_SOURCES = [
   { label: "S드라이브", root: "S:\\콘텐츠잇다 주요 파일" },
 ];
 const DRIVE_SKIP_DIRS = new Set(["$RECYCLE.BIN", "System Volume Information", "Recovery", ".Encrypted", ".shortcut-targets-by-id"]);
+// 민감문서 제외(블랙리스트) — 폴더/파일 이름에 아래 단어가 들어가면 색인 제외. .env DRIVE_EXCLUDE 로 수정 가능
+const DRIVE_EXCLUDE = (process.env.DRIVE_EXCLUDE ||
+  "비번,비밀번호,패스워드,password,passwd,계약서,급여,급여명세,급여대장,연봉,인건비,인사기록,개인정보,주민등록,주민번호,신분증,여권,계좌,통장,카드번호,대외비,기밀,보안서약,이력서,근로계약")
+  .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+function driveExcluded(name) { const n = (name || "").toLowerCase(); return DRIVE_EXCLUDE.some((p) => n.includes(p)); }
 const DRIVE_INDEX_PATH = path.join(DATA_DIR, "drive_index.json");
 const DRIVE_DOC_EXT = new Set(["pdf", "docx", "txt", "md", "csv", "pptx", "xlsx", "xls", "hwp", "hwpx"]); // 본문 추출
 const DRIVE_IMG = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "heic", "bmp", "tif", "tiff"]);
@@ -1585,7 +1590,7 @@ async function reindexDrive({ limit = 0, subdir = "" } = {}) {
   const sources = subdir
     ? [{ label: DRIVE_SOURCES[0].label, root: path.join(DRIVE_SOURCES[0].root, subdir), base: DRIVE_SOURCES[0].root }]
     : DRIVE_SOURCES.map((s) => ({ label: s.label, root: s.root, base: s.root }));
-  driveStatus = { state: "running", scanned: 0, withText: 0, total: 0, startedAt: new Date().toISOString(), finishedAt: null, sources: sources.map((s) => s.root) };
+  driveStatus = { state: "running", scanned: 0, withText: 0, excluded: 0, total: 0, startedAt: new Date().toISOString(), finishedAt: null, sources: sources.map((s) => s.root) };
   const idx = [];
   let id = 0;
   const walk = async (dir, src) => {
@@ -1594,6 +1599,7 @@ async function reindexDrive({ limit = 0, subdir = "" } = {}) {
     for (const e of entries) {
       if (limit && idx.length >= limit) return;
       if (e.name.startsWith(".") || DRIVE_SKIP_DIRS.has(e.name)) continue;
+      if (driveExcluded(e.name)) { driveStatus.excluded = (driveStatus.excluded || 0) + 1; continue; } // 민감문서 제외(블랙리스트)
       const full = path.join(dir, e.name);
       if (e.isDirectory()) { await walk(full, src); continue; }
       const ext = (e.name.split(".").pop() || "").toLowerCase();
