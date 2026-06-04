@@ -10,6 +10,7 @@ const TABS = [
   { id: "gantt",     e: "📊", l: "간트" },
   { id: "calendar",  e: "📅", l: "캘린더" },
   { id: "chat",      e: "💬", l: "채팅" },
+  { id: "knowledge", e: "📚", l: "지식센터" },
   { id: "archive",   e: "📦", l: "보관함" },
 ];
 
@@ -43,7 +44,7 @@ export default function LeftPanel({ tab, setTab, projects = [], allNodes = [], p
 
         <div style={{ padding: "8px 10px", borderTop: "1px solid #e2e8f0" }}>
           <div style={{ fontSize: 9, color: "#cbd5e1", marginBottom: 4 }}>v2 예정</div>
-          {["🏠 사무공간", "📖 위키"].map((l) => (
+          {["🏠 사무공간"].map((l) => (
             <div key={l} style={{ fontSize: 10, color: "#e2e8f0", padding: "2px 0" }}>{l}</div>
           ))}
         </div>

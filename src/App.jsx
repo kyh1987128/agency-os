@@ -6,6 +6,7 @@ import RightPanel from "./components/RightPanel";
 import ProjectsView from "./components/ProjectsView";
 import KanbanView from "./components/KanbanView";
 import ChatView from "./components/ChatView";
+import KnowledgeCenter from "./components/KnowledgeCenter";
 import GanttView from "./components/GanttView";
 import CalendarView from "./components/CalendarView";
 import ArchiveView from "./components/ArchiveView";
@@ -18,6 +19,7 @@ const { bg: B, border: BR, text: T, muted: M } = COLORS;
 export default function App() {
   const [tab,           setTab]           = useState("dashboard");
   const [modal,         setModal]         = useState(null);
+  const [chatHandoff,   setChatHandoff]   = useState(null); // 퀘스트→채팅 인계 {botId,message,label,nonce}
   const [activeProject, setActiveProject] = useState(null);
   const [projects,      setProjects]      = useState([]);
   const [projData,      setProjData]      = useState([]);
@@ -103,7 +105,19 @@ export default function App() {
 
       {tab === "chat" ? (
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-          <ChatView activeProject={activeProject} />
+          <ChatView activeProject={activeProject} handoff={chatHandoff} />
+        </div>
+      ) : tab === "knowledge" ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid " + BR, background: "#ffffff", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: T }}>📚 지식센터 <span style={{ fontSize: 10, color: M, fontWeight: 400 }}>· 사내위키 · 업무매뉴얼</span></span>
+            <span style={{ fontSize: 10, color: M }}>{new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" })}</span>
+          </div>
+          <KnowledgeCenter
+            humans={humans}
+            activeProject={activeProject}
+            onSendToBot={({ botId, message, label }) => { setChatHandoff({ botId, message, label, nonce: Date.now() }); setTab("chat"); }}
+          />
         </div>
       ) : tab === "archive" ? (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
