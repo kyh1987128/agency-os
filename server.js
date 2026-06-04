@@ -915,7 +915,7 @@ app.post("/api/projects/:pid/chat", (req, res) => {
   const difyFiles = toDifyFiles(files);
   // 회사 드라이브 지식 자동 참조 (관련 문서 본문을 컨텍스트로 주입)
   const driveCtx = searchDriveForChat(message);
-  if (driveCtx) injectedMessage = `[참고할 회사 자료]\n${driveCtx}\n----------\n위 회사 자료를 우선 근거로, 다음 질문에 답하세요.\n\n${injectedMessage}`;
+  if (driveCtx) injectedMessage = `[참고용 회사 자료 — 질문과 관련될 때만 근거로 쓰고, 관련 없으면 이 자료를 언급하지 말고 평소대로 답하세요]\n${driveCtx}\n----------\n질문: ${injectedMessage}`;
 
   // 통합 디렉터 (오케스트레이터): 여러 전문봇을 조율
   if (bot === "team" || channel === "team") {
@@ -1625,8 +1625,15 @@ async function reindexDrive({ limit = 0, subdir = "" } = {}) {
 // 채팅 시 질문과 관련된 회사 문서 본문을 찾아 컨텍스트로 반환(상위 2건)
 function searchDriveForChat(query) {
   if (!driveMini || !query || query.trim().length < 6) return "";
+  // 여러 단어 질문은 최소 2개 단어가 일치할 때만(오탐 줄이기)
+  const qWords = query.trim().split(/\s+/).filter((w) => w.length >= 2).length;
+  const minTerms = qWords >= 2 ? 2 : 1;
   let hits; try { hits = driveMini.search(query); } catch { return ""; }
-  const docHits = hits.filter((h) => { const d = driveIndex[h.id]; return d && d.type === "doc" && d.text; }).slice(0, 2);
+  const top = hits[0]?.score || 0;
+  const docHits = hits
+    .filter((h) => (h.terms || []).length >= minTerms && h.score >= top * 0.55)
+    .filter((h) => { const d = driveIndex[h.id]; return d && d.type === "doc" && d.text; })
+    .slice(0, 2);
   if (!docHits.length) return "";
   let ctx = "";
   for (const h of docHits) { const d = driveIndex[h.id]; ctx += `\n[회사문서: ${d.name}${d.folder ? ` (${d.folder})` : ""}]\n${(d.text || "").slice(0, 2500)}\n`; }
