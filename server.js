@@ -1207,9 +1207,17 @@ app.get("/api/wiki/:id", (req, res) => {
 });
 // POST /api/wiki — 생성
 app.post("/api/wiki", (req, res) => {
-  const { type = "wiki", title = "제목 없음", category = "미분류", tags = [], body = "", steps = [] } = req.body || {};
+  const { type = "wiki", title = "제목 없음", category = "미분류", tags = [], body = "", steps = [],
+          manualType, routine, form } = req.body || {};
   const now = new Date().toISOString();
-  const doc = { id: randomUUID().slice(0, 8), type, title, category, tags, body, steps, links: [], createdAt: now, updatedAt: now, history: [] };
+  const doc = {
+    id: randomUUID().slice(0, 8), type, title, category, tags, body, steps, links: [],
+    // 업무매뉴얼 유형: procedure(절차) | routine(반복) | form(양식)
+    manualType: type === "manual" ? (manualType || "procedure") : undefined,
+    routine: routine || (manualType === "routine" ? { cycle: "daily", resetAt: "09:00", items: [], rotation: [], lastReset: null } : undefined),
+    form: form || (manualType === "form" ? { templates: [], goodExample: "", badExample: "" } : undefined),
+    createdAt: now, updatedAt: now, history: [],
+  };
   saveWikiDoc(doc);
   res.json(doc);
 });
@@ -1217,13 +1225,14 @@ app.post("/api/wiki", (req, res) => {
 app.patch("/api/wiki/:id", (req, res) => {
   const doc = loadWikiDoc(req.params.id);
   if (!doc) return res.status(404).json({ error: "not found" });
-  const prev = { at: doc.updatedAt, title: doc.title, body: doc.body, steps: doc.steps };
+  const prev = { at: doc.updatedAt, title: doc.title, body: doc.body, steps: doc.steps, routine: doc.routine, form: doc.form };
   const history = [prev, ...(doc.history || [])].slice(0, 20);
-  const { title, category, tags, body, steps, type } = req.body || {};
+  const { title, category, tags, body, steps, type, manualType, routine, form } = req.body || {};
   const next = {
     ...doc,
     title: title ?? doc.title, category: category ?? doc.category, tags: tags ?? doc.tags,
     body: body ?? doc.body, steps: steps ?? doc.steps, type: type ?? doc.type,
+    manualType: manualType ?? doc.manualType, routine: routine ?? doc.routine, form: form ?? doc.form,
     updatedAt: new Date().toISOString(), history,
   };
   saveWikiDoc(next);

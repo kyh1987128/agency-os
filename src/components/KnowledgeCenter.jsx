@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -120,8 +120,93 @@ export default function KnowledgeCenter({ humans = [], activeProject = "default"
               : <ManualGallery manuals={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "" })} />
           ) : (
             sel ? <WikiReadPane doc={sel} docs={docs} humans={humans} favs={favs} toggleFav={toggleFav} onEdit={startEdit} onDelete={delDoc} onSelect={selectDoc} onNewByTitle={(t) => setCreating({ title: t, category: sel.category })} patchDoc={patchDoc} onBack={() => setSelId(null)} />
-              : <WikiGallery wikis={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "" })} />
+              : <ZoneMap wikis={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "" })} favs={favs} toggleFav={toggleFav} query={query} />
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 위키 구역 지도 (B안) ───────────────────────────────────────────────────────
+function ZoneMap({ wikis, onSelect, onNew, favs, toggleFav, query }) {
+  const contentRef = useRef(null);
+  const [lines, setLines] = useState([]);
+
+  const zones = useMemo(() => {
+    const m = {};
+    wikis.forEach((d) => { (m[d.category || "미분류"] ||= []).push(d); });
+    return Object.entries(m).map(([cat, docs]) => ({ cat, docs }));
+  }, [wikis]);
+
+  // [[문서]] 링크 → 보이는 문서끼리 연결 엣지
+  const edges = useMemo(() => {
+    const byTitle = {}; wikis.forEach((d) => { byTitle[d.title] = d.id; });
+    const es = [];
+    wikis.forEach((d) => {
+      const found = new Set();
+      (d.body || "").replace(/\[\[([^\]|#]+)(?:#[^\]]+)?\]\]/g, (_, t) => { const id = byTitle[t.trim()]; if (id && id !== d.id) found.add(id); return ""; });
+      found.forEach((to) => es.push({ from: d.id, to, key: d.id + "-" + to }));
+    });
+    return es;
+  }, [wikis]);
+
+  // 카드 중심 좌표 측정 → 연결선
+  useLayoutEffect(() => {
+    const measure = () => {
+      const content = contentRef.current; if (!content) return;
+      const cr = content.getBoundingClientRect();
+      const center = (id) => { const el = content.querySelector(`[data-doc="${id}"]`); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left - cr.left + r.width / 2, y: r.top - cr.top + r.height / 2 }; };
+      const ls = [];
+      edges.forEach((e) => { const a = center(e.from), b = center(e.to); if (a && b) ls.push({ a, b, key: e.key }); });
+      setLines(ls);
+    };
+    const raf = requestAnimationFrame(measure);
+    const ro = new ResizeObserver(measure); if (contentRef.current) ro.observe(contentRef.current);
+    window.addEventListener("resize", measure);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, [edges, zones]);
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#f8fafc" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 20px 8px", flexWrap: "wrap" }}>
+        <span style={{ fontSize: 15, fontWeight: 800, color: "#1e293b" }}>🗺️ 사내위키 지도</span>
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>구역=분야 · 선=문서 연결 · 클릭하면 열려요</span>
+        <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ 새 위키</button>
+      </div>
+      <div style={{ flex: 1, overflow: "auto", padding: "8px 20px 28px", minHeight: 0 }}>
+        <div ref={contentRef} style={{ position: "relative", minHeight: "100%" }}>
+          <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 0, overflow: "visible" }}>
+            {lines.map((l) => (
+              <path key={l.key} d={`M ${l.a.x} ${l.a.y} C ${(l.a.x + l.b.x) / 2} ${l.a.y}, ${(l.a.x + l.b.x) / 2} ${l.b.y}, ${l.b.x} ${l.b.y}`} fill="none" stroke="#c7d2fe" strokeWidth="1.5" strokeDasharray="4 3" />
+            ))}
+          </svg>
+          <div style={{ position: "relative", zIndex: 1, display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
+            {zones.length === 0 && <div style={{ color: "#cbd5e1", fontSize: 13, padding: 30 }}>{query ? "검색 결과 없음" : "위키가 없습니다. + 새 위키로 시작하세요."}</div>}
+            {zones.map((z) => {
+              const c = catColor(z.cat);
+              return (
+                <div key={z.cat} style={{ width: 232, background: "#fff", border: `1px solid ${c}33`, borderTop: `3px solid ${c}`, borderRadius: 12, boxShadow: "0 2px 10px #00000010", overflow: "hidden" }}>
+                  <div style={{ padding: "8px 12px", background: c + "12", fontSize: 12, fontWeight: 800, color: c, display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 3, background: c }} />{z.cat}
+                    <span style={{ marginLeft: "auto", fontSize: 10, color: c, opacity: 0.7 }}>{z.docs.length}</span>
+                  </div>
+                  <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                    {z.docs.map((d) => (
+                      <div key={d.id} data-doc={d.id} onClick={() => onSelect(d.id)}
+                        style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 10px", border: "1px solid #eef2ff", borderRadius: 9, cursor: "pointer", background: "#fbfcff" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = c + "12"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "#fbfcff"; }}>
+                        <span style={{ fontSize: 14 }}>📖</span>
+                        <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</span>
+                        <span onClick={(e) => { e.stopPropagation(); toggleFav(d.id); }} style={{ fontSize: 12, color: favs.includes(d.id) ? "#f59e0b" : "#e2e8f0" }}>{favs.includes(d.id) ? "⭐" : "☆"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
