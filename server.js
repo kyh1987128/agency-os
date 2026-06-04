@@ -1585,17 +1585,26 @@ function loadDriveIndex() {
   try { driveIndex = JSON.parse(fs.readFileSync(DRIVE_INDEX_PATH, "utf8")); buildDriveMini(); driveStatus.total = driveIndex.length; driveStatus.state = "done"; console.log(`[drive] 색인 로드: ${driveIndex.length}건`); }
   catch { driveIndex = []; }
 }
+// 윈도우 긴경로(>260자) 지원 + 스트리밍 폴더 읽기 3회 재시도
+const longPath = (p) => (process.platform === "win32" && !p.startsWith("\\\\?\\") ? "\\\\?\\" + path.resolve(p) : p);
+async function readdirSafe(dir) {
+  for (let i = 0; i < 3; i++) {
+    try { return await fs.promises.readdir(longPath(dir), { withFileTypes: true }); }
+    catch { if (i === 2) { driveStatus.failedDirs = (driveStatus.failedDirs || 0) + 1; return []; } await new Promise((r) => setTimeout(r, 250 * (i + 1))); }
+  }
+  return [];
+}
 async function reindexDrive({ limit = 0, subdir = "" } = {}) {
   if (driveStatus.state === "running") return driveStatus;
   const sources = subdir
     ? [{ label: DRIVE_SOURCES[0].label, root: path.join(DRIVE_SOURCES[0].root, subdir), base: DRIVE_SOURCES[0].root }]
     : DRIVE_SOURCES.map((s) => ({ label: s.label, root: s.root, base: s.root }));
-  driveStatus = { state: "running", scanned: 0, withText: 0, excluded: 0, total: 0, startedAt: new Date().toISOString(), finishedAt: null, sources: sources.map((s) => s.root) };
+  driveStatus = { state: "running", scanned: 0, withText: 0, excluded: 0, failedDirs: 0, total: 0, startedAt: new Date().toISOString(), finishedAt: null, sources: sources.map((s) => s.root) };
   const idx = [];
   let id = 0;
   const walk = async (dir, src) => {
     if (limit && idx.length >= limit) return;
-    let entries; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    const entries = await readdirSafe(dir);
     for (const e of entries) {
       if (limit && idx.length >= limit) return;
       if (e.name.startsWith(".") || DRIVE_SKIP_DIRS.has(e.name)) continue;
@@ -1604,11 +1613,11 @@ async function reindexDrive({ limit = 0, subdir = "" } = {}) {
       if (e.isDirectory()) { await walk(full, src); continue; }
       const ext = (e.name.split(".").pop() || "").toLowerCase();
       if (!DRIVE_DOC_EXT.has(ext) && !DRIVE_META_EXT.has(ext)) continue;
-      let stat; try { stat = fs.statSync(full); } catch { continue; }
+      let stat; try { stat = await fs.promises.stat(longPath(full)); } catch { continue; }
       const rel = path.relative(src.base, dir);
       const rec = { id: id++, path: full, name: e.name, folder: `${src.label}${rel ? "/" + rel : ""}`, source: src.label, type: driveTypeOf(ext), mtime: stat.mtime.toISOString(), size: stat.size, text: "" };
       if (DRIVE_DOC_EXT.has(ext) && stat.size < 50 * 1024 * 1024) {
-        try { const buf = await fs.promises.readFile(full); rec.text = await extractFileText(buf, e.name, ""); if (rec.text) driveStatus.withText++; } catch {}
+        try { const buf = await fs.promises.readFile(longPath(full)); rec.text = await extractFileText(buf, e.name, ""); if (rec.text) driveStatus.withText++; } catch {}
       }
       idx.push(rec);
       driveStatus.scanned = idx.length;
