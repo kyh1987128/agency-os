@@ -60,6 +60,15 @@ export default function KnowledgeCenter({ humans = [], activeProject = "default"
   const [creating, setCreating] = useState(null);
   const [favs, setFavs] = useState(() => { try { return JSON.parse(localStorage.getItem("wikiFavs") || "[]"); } catch { return []; } });
   const [obProgress, setObProgress] = useState(() => { try { return JSON.parse(localStorage.getItem("onboardingProgress") || "{}"); } catch { return {}; } });
+  const [wikiSplit, setWikiSplit] = useState(34); // 위키 2분할: 왼쪽 패널 %
+  const wikiWrapRef = useRef(null);
+  const startWikiResize = (e) => {
+    e.preventDefault();
+    const wrap = wikiWrapRef.current; if (!wrap) return;
+    const onMove = (ev) => { const r = wrap.getBoundingClientRect(); setWikiSplit(Math.max(22, Math.min(58, ((ev.clientX - r.left) / r.width) * 100))); };
+    const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+  };
 
   const load = () => fetch(`${API}/api/wiki`).then((r) => r.json()).then((d) => setDocs(Array.isArray(d) ? d : [])).catch(() => {});
   useEffect(() => { load(); }, []);
@@ -137,8 +146,20 @@ export default function KnowledgeCenter({ humans = [], activeProject = "default"
             sel ? <ManualDetail doc={sel} humans={humans} docs={docs} patchDoc={patchDoc} onEdit={startEdit} onDelete={delDoc} onSelect={selectDoc} onBack={() => setSelId(null)} onSendToBot={onSendToBot} activeProject={activeProject} />
               : <ManualBoard manuals={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "" })} query={query} setQuery={setQuery} favs={favs} />
           ) : (
-            sel ? <WikiReadPane doc={sel} docs={docs} humans={humans} favs={favs} toggleFav={toggleFav} onEdit={startEdit} onDelete={delDoc} onSelect={selectDoc} onNewByTitle={(t) => setCreating({ title: t, category: sel.category })} patchDoc={patchDoc} onBack={() => setSelId(null)} />
-              : <WikiHome wikis={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "" })} query={query} setQuery={setQuery} favs={favs} toggleFav={toggleFav} />
+            <div ref={wikiWrapRef} style={{ flex: 1, display: "flex", minHeight: 0 }}>
+              {/* 왼쪽: 제목 목록 내비 — 리사이즈 */}
+              <div style={{ width: wikiSplit + "%", minWidth: 200, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <WikiNav wikis={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "" })} query={query} setQuery={setQuery} selId={selId} />
+              </div>
+              {/* 리사이즈 바 */}
+              <div onMouseDown={startWikiResize} title="드래그해서 너비 조절" style={{ width: 6, flexShrink: 0, cursor: "col-resize", background: "#eef2f7" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#c7d2fe")} onMouseLeave={(e) => (e.currentTarget.style.background = "#eef2f7")} />
+              {/* 오른쪽: 문서 내용 또는 환영 */}
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0, background: "#fff" }}>
+                {sel ? <WikiReadPane doc={sel} docs={docs} humans={humans} favs={favs} toggleFav={toggleFav} onEdit={startEdit} onDelete={delDoc} onSelect={selectDoc} onNewByTitle={(t) => setCreating({ title: t, category: sel.category })} patchDoc={patchDoc} onBack={() => setSelId(null)} />
+                  : <WikiWelcome wikis={results} onSelect={selectDoc} />}
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -723,8 +744,91 @@ function periodKey(cycle, d = new Date()) {
   return d.toISOString().slice(0, 10);
 }
 
-// ── 사내위키: 나무위키식 대문 ──────────────────────────────────────────────────
-function WikiHome({ wikis, onSelect, onNew, query, setQuery, favs }) {
+// ── 사내위키: 왼쪽 제목 목록 내비 (말줄임·세로 스크롤만) ──────────────────────────
+function WikiNav({ wikis, onSelect, onNew, query, setQuery, selId }) {
+  const [open, setOpen] = useState({});
+  const groups = useMemo(() => {
+    const m = {}; wikis.forEach((d) => { (m[d.category || "미분류"] ||= []).push(d); });
+    return Object.entries(m).sort((a, b) => b[1].length - a[1].length);
+  }, [wikis]);
+  const isOpen = (c) => open[c] !== false;
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#fafbfd", borderRight: "1px solid #e2e8f0" }}>
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: "#1e293b" }}>📖 사내위키</span>
+          <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>+ 새</button>
+        </div>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="🔍 검색" style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 12, outline: "none", color: "#1e293b" }} />
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "6px 5px 20px" }}>
+        {groups.map(([cat, docs]) => {
+          const c = catColor(cat), o = isOpen(cat);
+          return (
+            <div key={cat} style={{ marginBottom: 1 }}>
+              <div onClick={() => setOpen((p) => ({ ...p, [cat]: p[cat] === false ? true : false }))} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 8px", cursor: "pointer", borderRadius: 6 }}>
+                <span style={{ fontSize: 9, color: "#94a3b8", width: 8, flexShrink: 0 }}>{o ? "▾" : "▸"}</span>
+                <span style={{ width: 7, height: 7, borderRadius: 2, background: c, flexShrink: 0 }} />
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{CAT_ICON[cat] || "📁"} {cat}</span>
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "#cbd5e1", flexShrink: 0 }}>{docs.length}</span>
+              </div>
+              {o && docs.map((d) => { const on = d.id === selId;
+                return (
+                  <div key={d.id} onClick={() => onSelect(d.id)} title={d.title} style={{ fontSize: 12, color: on ? "#4338ca" : "#475569", fontWeight: on ? 700 : 400, background: on ? "#eef2ff" : "transparent", padding: "5px 8px 5px 25px", cursor: "pointer", borderRadius: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "#eef2ff66"; }} onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>
+                    {d.title}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+        {groups.length === 0 && <div style={{ fontSize: 11, color: "#cbd5e1", padding: 16, textAlign: "center" }}>{query ? "검색 결과 없음" : "문서 없음"}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── 사내위키: 오른쪽 환영(문서 미선택 시) ──────────────────────────────────────
+function WikiWelcome({ wikis, onSelect }) {
+  const starters = [{ icon: "📘", title: "지식센터 사용법", sub: "위키·매뉴얼 쓰는 법" }, { icon: "🏢", title: "회사 소개", sub: "미션·사업·조직" }, { icon: "🤖", title: "AI 사용 범위 정책", sub: "AI를 어디까지 쓰나" }];
+  const recent = [...wikis].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "")).slice(0, 8);
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "44px 32px", display: "flex", justifyContent: "center" }}>
+      <div style={{ maxWidth: 560, width: "100%" }}>
+        <div style={{ textAlign: "center", marginBottom: 26 }}>
+          <div style={{ fontSize: 44, marginBottom: 8 }}>📖</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "#1e293b", marginBottom: 5 }}>무엇을 찾으세요?</div>
+          <div style={{ fontSize: 12.5, color: "#94a3b8", lineHeight: 1.6 }}>왼쪽에서 문서를 고르거나 아래에서 시작하세요.<br />문서 안 파란 링크로 계속 이동할 수 있어요.</div>
+        </div>
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: "#16a34a", marginBottom: 9 }}>🌱 처음이세요? 여기부터</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10, marginBottom: 26 }}>
+          {starters.map((s) => { const d = wikis.find((x) => x.title === s.title);
+            return (
+              <div key={s.title} onClick={() => d && onSelect(d.id)} style={{ display: "flex", alignItems: "center", gap: 9, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 12, padding: "12px 13px", cursor: d ? "pointer" : "default", opacity: d ? 1 : 0.45 }}>
+                <span style={{ fontSize: 22 }}>{s.icon}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "#14532d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</div>
+                  <div style={{ fontSize: 10, color: "#16a34a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.sub}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: "#64748b", marginBottom: 8 }}>🕒 최근 변경</div>
+        <div>
+          {recent.map((d) => (
+            <div key={d.id} onClick={() => onSelect(d.id)} style={{ fontSize: 12.5, color: "#475569", padding: "6px 8px", cursor: "pointer", borderRadius: 6 }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>· {d.title}</div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 사내위키: 나무위키식 대문 (미사용 — WikiNav/WikiWelcome로 대체) ─────────────
+function WikiHome({ wikis, onSelect, onNew, query, setQuery, favs, compact, selId }) {
   const [openCats, setOpenCats] = useState({});
   const groups = useMemo(() => {
     const m = {};
@@ -738,14 +842,14 @@ function WikiHome({ wikis, onSelect, onNew, query, setQuery, favs }) {
   const toggle = (cat) => setOpenCats((p) => ({ ...p, [cat]: p[cat] === false ? true : false }));
   const ago = (iso) => { if (!iso) return ""; const s = (Date.now() - new Date(iso).getTime()) / 1000; if (s < 60) return "방금"; if (s < 3600) return Math.floor(s / 60) + "분 전"; if (s < 86400) return Math.floor(s / 3600) + "시간 전"; return Math.floor(s / 86400) + "일 전"; };
   return (
-    <div style={{ flex: 1, overflowY: "auto", background: "linear-gradient(180deg,#fbfcff,#fff 220px)" }}>
-      <div style={{ maxWidth: 1240, margin: "0 auto", padding: "22px 32px 50px" }}>
-        <div style={{ display: "flex", alignItems: "flex-start", marginBottom: 14 }}>
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#1e293b" }}>📖 사내위키</div>
-            <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 3 }}>회사의 모든 지식이 여기 있어요. 검색하거나 아래에서 골라보세요 👇</div>
+    <div style={{ flex: 1, overflowY: "auto", background: compact ? "#fafbfd" : "linear-gradient(180deg,#fbfcff,#fff 220px)" }}>
+      <div style={{ maxWidth: compact ? "none" : 1240, margin: "0 auto", padding: compact ? "14px 14px 30px" : "22px 32px 50px" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: compact ? 15 : 20, fontWeight: 800, color: "#1e293b" }}>📖 사내위키</div>
+            {!compact && <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 3 }}>회사의 모든 지식이 여기 있어요. 검색하거나 아래에서 골라보세요 👇</div>}
           </div>
-          <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, padding: "8px 15px", fontSize: 12, fontWeight: 700, cursor: "pointer", boxShadow: "0 2px 8px #6366f155" }}>+ 새 위키</button>
+          <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, padding: compact ? "5px 10px" : "8px 15px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>+ 새 위키</button>
         </div>
         {/* 큰 검색 */}
         <div style={{ position: "relative", marginBottom: 18 }}>
@@ -794,7 +898,7 @@ function WikiHome({ wikis, onSelect, onNew, query, setQuery, favs }) {
 
             {/* 분류 컬러 타일 보드 */}
             <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12, borderTop: "1px solid #f1f5f9", paddingTop: 16 }}>분류</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 14, alignItems: "start" }}>
+            <div style={{ display: "grid", gridTemplateColumns: compact ? "1fr" : "repeat(auto-fill, minmax(250px, 1fr))", gap: compact ? 10 : 14, alignItems: "start" }}>
               {groups.map(([cat, docs]) => {
                 const c = catColor(cat), open = openCats[cat] === true, shown = open ? docs : docs.slice(0, 4);
                 return (
