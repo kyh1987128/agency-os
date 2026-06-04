@@ -502,7 +502,20 @@ const DIFY_KEYS = {
   ppt:      process.env.DIFY_KEY_PPT      || "",
 };
 // 프로젝트+채널별 Dify conversation_id 유지 → 대화 맥락 보존
-const difyConversations = {};
+// 재시작에도 봇이 맥락을 잊지 않도록 파일로 영속화한다.
+const difyConvPath = path.join(DATA_DIR, "dify_conversations.json");
+let difyConversations = {};
+try { difyConversations = JSON.parse(fs.readFileSync(difyConvPath, "utf8")) || {}; } catch { difyConversations = {}; }
+let difyConvSaveTimer = null;
+function saveDifyConversations() {
+  clearTimeout(difyConvSaveTimer);
+  difyConvSaveTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(difyConvPath, JSON.stringify(difyConversations));
+    } catch (e) { console.error("[difyConv save]", e.message); }
+  }, 400);
+}
 
 async function runDifyStream({ res, apiKey, query, user, convKey, files, onComplete }) {
   res.setHeader("Content-Type", "text/event-stream");
@@ -540,7 +553,10 @@ async function runDifyStream({ res, apiKey, query, user, convKey, files, onCompl
         if (!data) continue;
         try {
           const o = JSON.parse(data);
-          if (o.conversation_id) difyConversations[convKey] = o.conversation_id;
+          if (o.conversation_id && difyConversations[convKey] !== o.conversation_id) {
+            difyConversations[convKey] = o.conversation_id;
+            saveDifyConversations();
+          }
           if (o.answer) {
             fullText += o.answer;
             res.write(`data: ${JSON.stringify({ text: o.answer })}\n\n`);
@@ -1129,6 +1145,94 @@ app.post("/api/upload", upload.single("file"), (req, res) => {
     size: req.file.size,
     mime: req.file.mimetype,
   });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════
+// 지식센터 (위키 · 업무매뉴얼) API
+// ════════════════════════════════════════════════════════════════════════════════
+const WIKI_DIR = path.join(DATA_DIR, "wiki");
+function ensureWikiDir() { try { fs.mkdirSync(WIKI_DIR, { recursive: true }); } catch {} }
+function wikiPath(id) { return path.join(WIKI_DIR, `${id}.json`); }
+function loadWikiDoc(id) {
+  try { return JSON.parse(fs.readFileSync(wikiPath(id), "utf8")); } catch { return null; }
+}
+function saveWikiDoc(doc) {
+  ensureWikiDir();
+  fs.writeFileSync(wikiPath(doc.id), JSON.stringify(doc, null, 2), "utf8");
+  return doc;
+}
+function listWikiDocs() {
+  ensureWikiDir();
+  return fs.readdirSync(WIKI_DIR)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => { try { return JSON.parse(fs.readFileSync(path.join(WIKI_DIR, f), "utf8")); } catch { return null; } })
+    .filter(Boolean)
+    .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+}
+// 최초 1회 시드 (디렉터리 비었을 때)
+function ensureWikiSeed() {
+  ensureWikiDir();
+  if (fs.readdirSync(WIKI_DIR).filter((f) => f.endsWith(".json")).length > 0) return;
+  const now = new Date().toISOString();
+  const seeds = [
+    {
+      id: "welcome", type: "wiki", title: "지식센터 사용법", category: "회사", tags: ["가이드"],
+      body: "# 지식센터에 오신 걸 환영합니다\n\n이곳은 **사내위키**와 **업무매뉴얼**이 함께 사는 공간입니다.\n\n## 할 수 있는 것\n- 📖 **위키**: 회사 지식·용어·정책을 자유롭게 정리\n- 📋 **매뉴얼**: 업무 절차를 단계로 정리하고 봇·칸반과 연결\n- 🔗 `[[다른 문서]]` 로 문서끼리 링크\n- 🖼 이미지 드래그&드롭, ▶ 유튜브 링크 붙여넣기\n\n관련 문서: [[사업계획서 작성 매뉴얼]]\n",
+      steps: [], links: [], createdAt: now, updatedAt: now, history: [],
+    },
+    {
+      id: "manual-saup", type: "manual", title: "사업계획서 작성 매뉴얼", category: "사업", tags: ["사업계획서", "절차"],
+      body: "", links: [],
+      steps: [
+        { id: "s1", title: "공고문 분석", owner: "", desc: "공고문에서 지원금·마감·자격요건·가점을 추출한다.", checklist: [{ text: "요건 추출", done: false }, { text: "마감 확인", done: false }, { text: "가점 확인", done: false }], refs: [], botId: "saup", done: false },
+        { id: "s2", title: "요건 충족 점검", owner: "", desc: "우리 회사가 자격을 충족하는지, 가점 항목을 어떻게 채울지 점검.", checklist: [], refs: [], botId: "jiwon", done: false },
+        { id: "s3", title: "목차 구성", owner: "", desc: "심사 배점에 맞춰 목차를 잡는다.", checklist: [], refs: [], botId: "saup", done: false },
+        { id: "s4", title: "초안 작성", owner: "", desc: "목차별 초안을 작성한다.", checklist: [], refs: [], botId: "saup", done: false },
+        { id: "s5", title: "검토·제출", owner: "", desc: "검토 봇으로 보완 후 제출.", checklist: [], refs: [], botId: "review", done: false },
+      ],
+      createdAt: now, updatedAt: now, history: [],
+    },
+  ];
+  seeds.forEach(saveWikiDoc);
+}
+ensureWikiSeed();
+
+// GET /api/wiki — 전체 문서(메타+본문) — 클라 검색/트리용
+app.get("/api/wiki", (req, res) => res.json(listWikiDocs()));
+// GET /api/wiki/:id
+app.get("/api/wiki/:id", (req, res) => {
+  const doc = loadWikiDoc(req.params.id);
+  if (!doc) return res.status(404).json({ error: "not found" });
+  res.json(doc);
+});
+// POST /api/wiki — 생성
+app.post("/api/wiki", (req, res) => {
+  const { type = "wiki", title = "제목 없음", category = "미분류", tags = [], body = "", steps = [] } = req.body || {};
+  const now = new Date().toISOString();
+  const doc = { id: randomUUID().slice(0, 8), type, title, category, tags, body, steps, links: [], createdAt: now, updatedAt: now, history: [] };
+  saveWikiDoc(doc);
+  res.json(doc);
+});
+// PATCH /api/wiki/:id — 수정 (직전 버전 history 보관)
+app.patch("/api/wiki/:id", (req, res) => {
+  const doc = loadWikiDoc(req.params.id);
+  if (!doc) return res.status(404).json({ error: "not found" });
+  const prev = { at: doc.updatedAt, title: doc.title, body: doc.body, steps: doc.steps };
+  const history = [prev, ...(doc.history || [])].slice(0, 20);
+  const { title, category, tags, body, steps, type } = req.body || {};
+  const next = {
+    ...doc,
+    title: title ?? doc.title, category: category ?? doc.category, tags: tags ?? doc.tags,
+    body: body ?? doc.body, steps: steps ?? doc.steps, type: type ?? doc.type,
+    updatedAt: new Date().toISOString(), history,
+  };
+  saveWikiDoc(next);
+  res.json(next);
+});
+// DELETE /api/wiki/:id
+app.delete("/api/wiki/:id", (req, res) => {
+  try { fs.unlinkSync(wikiPath(req.params.id)); } catch {}
+  res.json({ ok: true });
 });
 
 // ════════════════════════════════════════════════════════════════════════════════
