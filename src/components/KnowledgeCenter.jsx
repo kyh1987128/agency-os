@@ -50,9 +50,10 @@ function preprocess(body, docs) {
 }
 
 // ── 메인 ──────────────────────────────────────────────────────────────────
-export default function KnowledgeCenter({ humans = [], activeProject = "default", onSendToBot }) {
+const SECTION_TAB = { wiki: "knowledge", manual: "manual", onboarding: "onboarding", daily: "daily" };
+export default function KnowledgeCenter({ humans = [], activeProject = "default", onSendToBot, section, targetDocId = null, onNavigate }) {
   const [docs, setDocs] = useState([]);
-  const [mode, setMode] = useState("manual"); // wiki | manual
+  const [mode, setMode] = useState(section || "manual"); // 최상위 탭으로 분리됨 — section으로 고정
   const [selId, setSelId] = useState(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(null);
@@ -60,7 +61,8 @@ export default function KnowledgeCenter({ humans = [], activeProject = "default"
   const [creating, setCreating] = useState(null);
   const [favs, setFavs] = useState(() => { try { return JSON.parse(localStorage.getItem("wikiFavs") || "[]"); } catch { return []; } });
   const [obProgress, setObProgress] = useState(() => { try { return JSON.parse(localStorage.getItem("onboardingProgress") || "{}"); } catch { return {}; } });
-  const [wikiSplit, setWikiSplit] = useState(34); // 위키 2분할: 왼쪽 패널 %
+  const [wikiSplit, setWikiSplit] = useState(34); // 2분할: 왼쪽 패널 %
+  const [lessonId, setLessonId] = useState(null); // 온보딩: 선택된 강의
   const wikiWrapRef = useRef(null);
   const startWikiResize = (e) => {
     e.preventDefault();
@@ -72,12 +74,15 @@ export default function KnowledgeCenter({ humans = [], activeProject = "default"
 
   const load = () => fetch(`${API}/api/wiki`).then((r) => r.json()).then((d) => setDocs(Array.isArray(d) ? d : [])).catch(() => {});
   useEffect(() => { load(); }, []);
+  // 다른 섹션에서 검색 후 점프해 들어온 경우 해당 문서 자동 오픈
+  useEffect(() => { if (targetDocId) { setSelId(targetDocId); setQuery(""); setEditing(false); setCreating(null); } }, [targetDocId]);
 
-  // 모드별 문서: 위키 / 매뉴얼(코스 제외) / 온보딩(코스만)
+  // 모드별 문서: 위키 / 업무매뉴얼(절차·양식 = 설명) / 온보딩(코스) / 일과·체크(반복)
   const modeDocs = docs.filter((d) => {
     if (mode === "wiki") return d.type === "wiki";
     if (mode === "onboarding") return d.type === "manual" && d.manualType === "course";
-    return d.type === "manual" && d.manualType !== "course"; // manual
+    if (mode === "daily") return d.type === "manual" && d.manualType === "routine";
+    return d.type === "manual" && d.manualType !== "course" && d.manualType !== "routine"; // 업무매뉴얼 = 절차+양식
   });
 
   // 온보딩 진도 (전역, localStorage) — 사람 구분 없이 "이 화면 기준" 진행 체크
@@ -93,14 +98,23 @@ export default function KnowledgeCenter({ humans = [], activeProject = "default"
     return ms;
   }, [docs]);
 
-  const results = useMemo(() => {
-    let list = modeDocs;
-    if (query.trim()) { const ids = new Set(mini.search(query.trim()).map((r) => r.id)); list = list.filter((d) => ids.has(d.id)); }
-    return list;
-  }, [modeDocs, query, mini]);
+  // 각 탭 보드는 전체 문서를 보여주고, 검색은 헤더의 '전역 통합검색'으로만 동작(탭 가로지름)
+  const results = modeDocs;
+  const globalResults = useMemo(() => {
+    const q = query.trim(); if (!q) return [];
+    const ids = new Set(mini.search(q).map((r) => r.id));
+    return docs.filter((d) => ids.has(d.id));
+  }, [query, docs, mini]);
+  const modeOf = (d) => d.type === "wiki" ? "wiki" : d.manualType === "course" ? "onboarding" : d.manualType === "routine" ? "daily" : "manual";
+  const jumpTo = (d) => {
+    const tgt = modeOf(d);
+    if (section && tgt !== section && onNavigate) { onNavigate(SECTION_TAB[tgt] || tgt, d.id); return; } // 다른 최상위 탭으로 이동
+    setMode(tgt); setEditing(false); setDraft(null); setCreating(null); setQuery(""); setSelId(d.id);
+  };
 
-  const switchMode = (m) => { setMode(m); setSelId(null); setEditing(false); setDraft(null); setCreating(null); setQuery(""); };
-  const selectDoc = (id) => { setEditing(false); setDraft(null); setCreating(null); setSelId(id); };
+  const switchMode = (m) => { setMode(m); setSelId(null); setLessonId(null); setEditing(false); setDraft(null); setCreating(null); setQuery(""); };
+  const selectDoc = (id) => { setEditing(false); setDraft(null); setCreating(null); setSelId(id); setLessonId(null); };
+  const pickLesson = (courseId, lid) => { setEditing(false); setDraft(null); setCreating(null); setSelId(courseId); setLessonId(lid); };
   const startEdit = () => { if (sel) { setDraft(JSON.parse(JSON.stringify(sel))); setEditing(true); } };
   const toggleFav = (id) => setFavs((p) => { const n = p.includes(id) ? p.filter((x) => x !== id) : [...p, id]; localStorage.setItem("wikiFavs", JSON.stringify(n)); return n; });
 
@@ -115,36 +129,69 @@ export default function KnowledgeCenter({ humans = [], activeProject = "default"
   };
   const createDoc = async () => {
     const c = creating;
-    const r = await fetch(`${API}/api/wiki`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: mode, title: c.title || "제목 없음", category: c.category || "미분류", body: mode === "wiki" ? "# " + (c.title || "") + "\n" : "", steps: mode === "manual" ? [{ id: "s" + Date.now(), title: "1단계", desc: "", owner: "", checklist: [], refs: [], botId: "", done: false }] : [] }) });
+    const type = mode === "wiki" ? "wiki" : "manual";
+    const manualType = mode === "onboarding" ? "course" : mode === "daily" ? "routine" : mode === "manual" ? "procedure" : undefined;
+    const payload = { type, title: c.title || "제목 없음", category: c.category || "미분류", body: mode === "wiki" ? "# " + (c.title || "") + "\n" : "" };
+    if (type === "manual") {
+      payload.manualType = manualType;
+      if (manualType === "procedure" || manualType === "course") payload.steps = [{ id: "s" + Date.now(), title: "1단계", desc: "", owner: "", checklist: [], refs: [], botId: "", done: false }];
+      if (manualType === "routine") payload.routine = { cycle: "daily", items: [{ text: "항목 1", done: false }], lastReset: new Date().toISOString() };
+    }
+    const r = await fetch(`${API}/api/wiki`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const doc = await r.json(); setDocs((p) => [doc, ...p]); setCreating(null); setSelId(doc.id); setDraft(JSON.parse(JSON.stringify(doc))); setEditing(true);
   };
   const delDoc = async (id) => { await fetch(`${API}/api/wiki/${id}`, { method: "DELETE" }); setDocs((p) => p.filter((d) => d.id !== id)); if (selId === id) { setSelId(null); setEditing(false); } };
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#f1f5f9" }}>
-      {/* 모드 탭 */}
-      <div style={{ display: "flex", gap: 8, padding: "10px 16px 0", background: "#fff", borderBottom: "1px solid #e2e8f0" }}>
-        {[["wiki", "📖 사내위키", "찾아 읽는 지식"], ["manual", "📋 업무매뉴얼", "늘 찾는 업무 절차·양식"], ["onboarding", "🎓 온보딩", "신입 학습 · 진도 체크"]].map(([m, l, sub]) => (
-          <button key={m} onClick={() => switchMode(m)} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 1, padding: "8px 18px 10px", border: "none", borderBottom: "3px solid " + (mode === m ? "#6366f1" : "transparent"), background: "transparent", cursor: "pointer" }}>
+      {/* (섹션은 최상위 탭으로 분리) 전역 통합검색 — 어느 섹션에서든 전체를 가로질러 검색·점프 */}
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: section ? "8px 16px" : "10px 16px 0", background: "#fff", borderBottom: "1px solid #e2e8f0" }}>
+        {!section && [["wiki", "📖 사내위키", "찾아 읽는 지식"], ["manual", "📋 업무매뉴얼", "업무 절차·양식 설명"], ["daily", "📅 일과·체크", "출근·보고 등 반복 체크"], ["onboarding", "🎓 온보딩", "신입 학습 · 진도 체크"]].map(([m, l, sub]) => (
+          <button key={m} onClick={() => switchMode(m)} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 1, padding: "8px 16px 10px", border: "none", borderBottom: "3px solid " + (mode === m ? "#6366f1" : "transparent"), background: "transparent", cursor: "pointer" }}>
             <span style={{ fontSize: 14, fontWeight: 800, color: mode === m ? "#4338ca" : "#94a3b8" }}>{l}</span>
             <span style={{ fontSize: 9.5, color: mode === m ? "#818cf8" : "#cbd5e1" }}>{sub}</span>
           </button>
         ))}
+        <div style={{ marginLeft: "auto", position: "relative", marginBottom: section ? 0 : 8 }}>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="🔍 지식 전체 검색 (위키·매뉴얼·일과·온보딩)"
+            style={{ width: 320, boxSizing: "border-box", border: "1px solid " + (query ? "#a5b4fc" : "#e2e8f0"), borderRadius: 18, padding: "8px 30px 8px 14px", fontSize: 12.5, outline: "none", color: "#1e293b", background: query ? "#fff" : "#f8fafc" }} />
+          {query && <span onClick={() => setQuery("")} title="검색 지우기" style={{ position: "absolute", right: 11, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: "#94a3b8", fontSize: 13, fontWeight: 700 }}>✕</span>}
+        </div>
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {/* 본문 (사이드바 없음 — 각 홈 화면에 검색·분류 내장) */}
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: (mode === "manual" && sel && (sel.manualType || "procedure") === "procedure") ? "#0f172a" : "#fff", minHeight: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "#fff", minHeight: 0 }}>
           {creating ? (
-            <div style={{ background: "#fff", flex: 1 }}><NewDocForm mode={mode === "onboarding" ? "manual" : mode} creating={creating} setCreating={setCreating} onCreate={createDoc} /></div>
+            <div style={{ background: "#fff", flex: 1 }}><NewDocForm mode={(mode === "onboarding" || mode === "daily") ? "manual" : mode} creating={creating} setCreating={setCreating} onCreate={createDoc} /></div>
           ) : editing ? (
             <div style={{ background: "#fff", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}><Editor draft={draft} setDraft={setDraft} onSave={saveDraft} onCancel={() => { setEditing(false); setDraft(null); }} humans={humans} docs={docs} /></div>
+          ) : query.trim() ? (
+            <GlobalSearch results={globalResults} onJump={jumpTo} query={query} />
+          ) : mode === "daily" ? (
+            sel ? <RoutineView doc={sel} patchDoc={patchDoc} onEdit={startEdit} onDelete={delDoc} onBack={() => setSelId(null)} />
+              : <DailyBoard items={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "총무", manualType: "routine" })} />
           ) : mode === "onboarding" ? (
-            sel ? <CoursePlayer doc={sel} docs={docs} obDone={obDone} obToggle={obToggle} onEdit={startEdit} onDelete={delDoc} onSelect={selectDoc} onBack={() => setSelId(null)} />
-              : <OnboardingHome courses={results} courseProgress={courseProgress} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "온보딩-공통" })} />
+            <div ref={wikiWrapRef} style={{ flex: 1, display: "flex", minHeight: 0 }}>
+              <div style={{ width: wikiSplit + "%", minWidth: 220, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <OnboardingNav courses={results} selCourseId={selId} selLessonId={lessonId} onPick={pickLesson} courseProgress={courseProgress} obDone={obDone} onNew={() => setCreating({ title: "", category: "온보딩-공통" })} />
+              </div>
+              <div onMouseDown={startWikiResize} title="드래그해서 너비 조절" style={{ width: 6, flexShrink: 0, cursor: "col-resize", background: "#eef2f7" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#c7d2fe")} onMouseLeave={(e) => (e.currentTarget.style.background = "#eef2f7")} />
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0, background: "#fff" }}>
+                <LessonPane course={sel} lessonId={lessonId} docs={docs} obDone={obDone} obToggle={obToggle} courseProgress={courseProgress} onPick={pickLesson} onEdit={startEdit} onDelete={delDoc} />
+              </div>
+            </div>
           ) : mode === "manual" ? (
-            sel ? <ManualDetail doc={sel} humans={humans} docs={docs} patchDoc={patchDoc} onEdit={startEdit} onDelete={delDoc} onSelect={selectDoc} onBack={() => setSelId(null)} onSendToBot={onSendToBot} activeProject={activeProject} />
-              : <ManualBoard manuals={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "" })} query={query} setQuery={setQuery} favs={favs} />
+            <div ref={wikiWrapRef} style={{ flex: 1, display: "flex", minHeight: 0 }}>
+              <div style={{ width: wikiSplit + "%", minWidth: 220, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <ManualNav manuals={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "" })} selId={selId} favs={favs} />
+              </div>
+              <div onMouseDown={startWikiResize} title="드래그해서 너비 조절" style={{ width: 6, flexShrink: 0, cursor: "col-resize", background: "#eef2f7" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#c7d2fe")} onMouseLeave={(e) => (e.currentTarget.style.background = "#eef2f7")} />
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0, background: "#fff" }}>
+                {sel ? <ManualDetail doc={sel} humans={humans} docs={docs} patchDoc={patchDoc} onEdit={startEdit} onDelete={delDoc} onSelect={selectDoc} onBack={() => setSelId(null)} onSendToBot={onSendToBot} activeProject={activeProject} />
+                  : <ManualWelcome manuals={results} onSelect={selectDoc} />}
+              </div>
+            </div>
           ) : (
             <div ref={wikiWrapRef} style={{ flex: 1, display: "flex", minHeight: 0 }}>
               {/* 왼쪽: 제목 목록 내비 — 리사이즈 */}
@@ -765,11 +812,10 @@ function WikiNav({ wikis, onSelect, onNew, query, setQuery, selId, favs = [] }) 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#fafbfd", borderRight: "1px solid #e2e8f0" }}>
       <div style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center" }}>
           <span style={{ fontSize: 14, fontWeight: 800, color: "#1e293b" }}>📖 사내위키</span>
           <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>+ 새</button>
         </div>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="🔍 검색" style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 12, outline: "none", color: "#1e293b" }} />
       </div>
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "6px 5px 20px" }}>
         {searching ? (
@@ -958,7 +1004,174 @@ function WikiHome({ wikis, onSelect, onNew, query, setQuery, favs, compact, selI
 }
 
 // ── 업무매뉴얼: 조직도형 보드 ──────────────────────────────────────────────────
-function ManualBoard({ manuals, onSelect, onNew, query, setQuery, favs }) {
+// ── 매뉴얼 좌측 내비 (2패널) ───────────────────────────────────────────────────
+function ManualNav({ manuals, onSelect, onNew, selId, favs = [] }) {
+  const [open, setOpen] = useState({});
+  const groups = useMemo(() => { const m = {}; manuals.forEach((d) => { (m[d.category || "기타"] ||= []).push(d); }); return Object.entries(m).sort((a, b) => b[1].length - a[1].length); }, [manuals]);
+  const selCat = useMemo(() => (manuals.find((d) => d.id === selId) || {}).category, [manuals, selId]);
+  const isOpen = (c) => (open[c] !== undefined ? open[c] : c === selCat);
+  const favDocs = manuals.filter((d) => favs.includes(d.id));
+  const Row = ({ d, indent }) => { const on = d.id === selId; const mt = mtypeOf(d);
+    return (
+      <div onClick={() => onSelect(d.id)} title={d.title} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: on ? "#4338ca" : "#475569", fontWeight: on ? 700 : 400, background: on ? "#eef2ff" : "transparent", padding: `5px 8px 5px ${indent}px`, cursor: "pointer", borderRadius: 6, overflow: "hidden", whiteSpace: "nowrap" }}
+        onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "#eef2ff66"; }} onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>
+        <span style={{ fontSize: 9, color: mt.color, flexShrink: 0 }}>{mt.icon}</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</span>
+      </div>
+    );
+  };
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#fafbfd", borderRight: "1px solid #e2e8f0" }}>
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", flexShrink: 0, display: "flex", alignItems: "center" }}>
+        <span style={{ fontSize: 14, fontWeight: 800, color: "#1e293b" }}>📒 업무매뉴얼</span>
+        <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>+ 새</button>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "6px 5px 20px" }}>
+        {favDocs.length > 0 && <div style={{ marginBottom: 4 }}><div style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", padding: "4px 8px" }}>⭐ 즐겨찾기</div>{favDocs.map((d) => <Row key={d.id} d={d} indent={16} />)}</div>}
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", padding: "6px 8px 4px" }}>분류</div>
+        {groups.map(([cat, ds]) => { const c = catColor(cat), o = isOpen(cat);
+          return (
+            <div key={cat} style={{ marginBottom: 1 }}>
+              <div onClick={() => setOpen((p) => ({ ...p, [cat]: !(p[cat] !== undefined ? p[cat] : cat === selCat) }))} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 8px", cursor: "pointer", borderRadius: 6 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#eef2f7")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                <span style={{ fontSize: 9, color: "#94a3b8", width: 8, flexShrink: 0 }}>{o ? "▾" : "▸"}</span>
+                <span style={{ width: 7, height: 7, borderRadius: 2, background: c, flexShrink: 0 }} />
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{CAT_ICON[cat] || "📁"} {cat}</span>
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "#cbd5e1", flexShrink: 0 }}>{ds.length}</span>
+              </div>
+              {o && ds.map((d) => <Row key={d.id} d={d} indent={25} />)}
+            </div>
+          );
+        })}
+        {groups.length === 0 && <div style={{ fontSize: 11, color: "#cbd5e1", padding: 16, textAlign: "center" }}>매뉴얼이 없습니다.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── 매뉴얼 환영(우측, 미선택) ──────────────────────────────────────────────────
+function ManualWelcome({ manuals, onSelect }) {
+  const byType = (t) => manuals.filter((d) => (d.manualType || "procedure") === t);
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "40px 30px", display: "flex", justifyContent: "center" }}>
+      <div style={{ maxWidth: 580, width: "100%" }}>
+        <div style={{ fontSize: 30, marginBottom: 6 }}>📒</div>
+        <div style={{ fontSize: 20, fontWeight: 800, color: "#1e293b", marginBottom: 6 }}>업무매뉴얼</div>
+        <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.7, marginBottom: 24 }}>업무를 어떻게 하는지 정리한 <b>설명 문서</b>입니다. 왼쪽에서 항목을 클릭하면 절차(무엇·왜·어떻게·예시)와 양식을 볼 수 있어요. <span style={{ color: "#94a3b8" }}>(출근·보고 체크는 ✅ 일과·체크 탭에서)</span></div>
+        {["procedure", "form"].map((t) => { const list = byType(t).slice(0, 8); if (!list.length) return null; const mt = MTYPE[t];
+          return (
+            <div key={t} style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: mt.color, marginBottom: 8 }}>{mt.icon} {mt.label}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {list.map((d) => <span key={d.id} onClick={() => onSelect(d.id)} style={{ background: "#fff", border: `1px solid ${mt.color}33`, borderRadius: 16, padding: "6px 12px", fontSize: 12.5, color: "#334155", cursor: "pointer", fontWeight: 600 }}>{d.title}</span>)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── 온보딩 좌측 내비 (과정→강의 트리, 2패널) ───────────────────────────────────
+function OnboardingNav({ courses, selCourseId, selLessonId, onPick, courseProgress, obDone, onNew }) {
+  const [open, setOpen] = useState({});
+  const common = courses.filter((c) => (c.tags || []).includes("공통"));
+  const role = courses.filter((c) => (c.tags || []).includes("직무"));
+  const etc = courses.filter((c) => !(c.tags || []).includes("공통") && !(c.tags || []).includes("직무"));
+  const overall = courses.length ? Math.round(courses.reduce((s, c) => s + courseProgress(c), 0) / courses.length) : 0;
+  const Course = (c) => { const lessons = c.steps || []; const o = open[c.id] !== undefined ? open[c.id] : c.id === selCourseId; const pct = courseProgress(c);
+    return (
+      <div key={c.id} style={{ marginBottom: 2 }}>
+        <div onClick={() => setOpen((p) => ({ ...p, [c.id]: !(p[c.id] !== undefined ? p[c.id] : c.id === selCourseId) }))} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 8px", cursor: "pointer", borderRadius: 7 }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "#eef2f7")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+          <span style={{ fontSize: 9, color: "#94a3b8", width: 8, flexShrink: 0 }}>{o ? "▾" : "▸"}</span>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: "#334155", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🎓 {c.title}</span>
+          <span style={{ fontSize: 9.5, color: pct === 100 ? "#16a34a" : "#94a3b8", fontWeight: 700, flexShrink: 0 }}>{pct}%</span>
+        </div>
+        {o && lessons.map((l, i) => { const on = c.id === selCourseId && l.id === selLessonId; const d = obDone(c.id, l.id);
+          return (
+            <div key={l.id} onClick={() => onPick(c.id, l.id)} title={l.title} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5, padding: "5px 8px 5px 24px", cursor: "pointer", borderRadius: 6, background: on ? "#eef2ff" : "transparent", color: on ? "#4338ca" : d ? "#94a3b8" : "#475569", fontWeight: on ? 700 : 400 }}
+              onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "#eef2ff66"; }} onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>
+              <span style={{ fontSize: 11, flexShrink: 0 }}>{d ? "✅" : on ? "▶" : "○"}</span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {l.title}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#fafbfd", borderRight: "1px solid #e2e8f0" }}>
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: "#1e293b" }}>🎓 온보딩</span>
+          <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>+ 새</button>
+        </div>
+        <div style={{ height: 6, background: "#e2e8f0", borderRadius: 4, overflow: "hidden", marginTop: 8 }}><div style={{ height: "100%", width: overall + "%", background: "linear-gradient(90deg,#6366f1,#22d3ee)" }} /></div>
+        <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 700, marginTop: 3 }}>전체 진도 {overall}%</div>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "6px 5px 20px" }}>
+        {common.length > 0 && <><div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", padding: "4px 8px" }}>📦 공통 (전원 필수)</div>{common.map(Course)}</>}
+        {role.length > 0 && <><div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", padding: "10px 8px 4px" }}>👔 직무별</div>{role.map(Course)}</>}
+        {etc.map(Course)}
+        {courses.length === 0 && <div style={{ fontSize: 11, color: "#cbd5e1", padding: 16, textAlign: "center" }}>과정이 없습니다.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── 온보딩 강의 본문(우측) ─────────────────────────────────────────────────────
+function LessonPane({ course, lessonId, docs, obDone, obToggle, courseProgress, onPick, onEdit, onDelete }) {
+  const [confirmDel, setConfirmDel] = useState(false);
+  const comps = mdComponents(docs, () => {}, () => {});
+  if (!course) return (
+    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", color: "#94a3b8", padding: 40, textAlign: "center" }}>
+      <div style={{ fontSize: 34, marginBottom: 10 }}>🎓</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: "#475569", marginBottom: 6 }}>온보딩 과정을 선택하세요</div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.7, maxWidth: 360 }}>왼쪽에서 과정을 펼치고 강의를 클릭하면 내용이 여기에 표시됩니다. 공통 과정부터 순서대로 학습하고 완료를 체크하세요.</div>
+    </div>
+  );
+  const lessons = course.steps || [];
+  const idx = lessons.findIndex((l) => l.id === lessonId);
+  const lesson = idx >= 0 ? lessons[idx] : null;
+  if (!lesson) { const pct = courseProgress(course);
+    return (
+      <div style={{ flex: 1, overflowY: "auto", padding: "30px 34px" }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: "#1e293b", marginBottom: 4 }}>🎓 {course.title}</div>
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>{lessons.length}개 강의 · 진도 {pct}%</div>
+        {course.body && <div style={{ marginBottom: 12 }}><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={comps}>{preprocess(course.body, docs)}</ReactMarkdown></div>}
+        <div style={{ fontSize: 13, color: "#475569", marginBottom: 12 }}>왼쪽에서 강의를 선택하거나, 첫 강의로 시작하세요.</div>
+        {lessons[0] && <button onClick={() => onPick(course.id, lessons[0].id)} style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 9, padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>▶ 첫 강의 시작</button>}
+      </div>
+    );
+  }
+  const isDone = obDone(course.id, lesson.id);
+  const next = () => { obToggle(course.id, lesson.id); if (idx < lessons.length - 1) onPick(course.id, lessons[idx + 1].id); };
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "22px 34px 40px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, color: "#6366f1", background: "#eef2ff", padding: "2px 9px", borderRadius: 8, fontWeight: 700 }}>🎓 {course.title} · 강의 {idx + 1}/{lessons.length}</span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <button onClick={onEdit} style={ghostBtn}>✏ 편집</button>
+          {confirmDel ? <button onClick={() => onDelete(course.id)} style={{ ...ghostBtn, color: "#fff", background: "#dc2626", border: "none" }}>삭제확인</button> : <button onClick={() => setConfirmDel(true)} style={{ ...ghostBtn, color: "#dc2626" }}>🗑</button>}
+        </span>
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: "#1e293b", marginBottom: 14 }}>{lesson.title}</div>
+      {lesson.desc ? <div style={{ marginBottom: 20 }}><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={comps}>{preprocess(lesson.desc, docs)}</ReactMarkdown></div>
+        : <div style={{ color: "#cbd5e1", fontSize: 13, marginBottom: 20 }}>(강의 내용 작성 예정 — ✏ 편집에서 추가)</div>}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: 16, flexWrap: "wrap" }}>
+        <button onClick={next} style={{ background: isDone ? "#fff" : "#16a34a", color: isDone ? "#16a34a" : "#fff", border: isDone ? "1px solid #bbf7d0" : "none", borderRadius: 9, padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+          {isDone ? "✓ 완료됨 (다시 보려면 클릭)" : idx < lessons.length - 1 ? "✓ 완료하고 다음 강의 ▶" : "✓ 완료 (마지막 강의)"}
+        </button>
+        {idx > 0 && <button onClick={() => onPick(course.id, lessons[idx - 1].id)} style={ghostBtn}>◀ 이전</button>}
+        {idx < lessons.length - 1 && <button onClick={() => onPick(course.id, lessons[idx + 1].id)} style={ghostBtn}>다음 ▶</button>}
+      </div>
+    </div>
+  );
+}
+
+function ManualBoard({ manuals, onSelect, onNew, favs }) {
   const [filter, setFilter] = useState("all");
   const list = manuals.filter((d) => filter === "all" || (d.manualType || "procedure") === filter);
   const groups = useMemo(() => {
@@ -971,15 +1184,15 @@ function ManualBoard({ manuals, onSelect, onNew, query, setQuery, favs }) {
     <div style={{ flex: 1, overflowY: "auto", padding: "16px 22px 30px", background: "#f8fafc" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         <span style={{ fontSize: 16, fontWeight: 800, color: "#1e293b" }}>📋 업무매뉴얼</span>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="🔍 매뉴얼 검색" style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 12px", fontSize: 12.5, outline: "none", width: 180, color: "#1e293b" }} />
+        <span style={{ fontSize: 11.5, color: "#94a3b8" }}>업무를 어떻게 하는지 — 절차·양식 설명 문서</span>
         <div style={{ display: "flex", gap: 5 }}>
-          {[["all", "전체", "#6366f1"], ["procedure", "📋 절차", "#6366f1"], ["routine", "🔁 반복", "#16a34a"], ["form", "📄 양식", "#f59e0b"]].map(([v, l, c]) => (
+          {[["all", "전체", "#6366f1"], ["procedure", "📋 절차", "#6366f1"], ["form", "📄 양식", "#f59e0b"]].map(([v, l, c]) => (
             <button key={v} onClick={() => setFilter(v)} style={{ padding: "5px 12px", borderRadius: 14, fontSize: 11.5, cursor: "pointer", fontWeight: 600, border: "1px solid " + (filter === v ? c : "#e2e8f0"), background: filter === v ? c + "15" : "#fff", color: filter === v ? c : "#94a3b8" }}>{l}</button>
           ))}
         </div>
         <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ 새 매뉴얼</button>
       </div>
-      {favM.length > 0 && filter === "all" && !query && (
+      {favM.length > 0 && filter === "all" && (
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", marginBottom: 6 }}>⭐ 자주 찾는</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1013,18 +1226,146 @@ function ManualBoard({ manuals, onSelect, onNew, query, setQuery, favs }) {
             </div>
           );
         })}
-        {groups.length === 0 && <div style={{ color: "#cbd5e1", fontSize: 13, padding: 30 }}>{query ? "검색 결과 없음" : "매뉴얼이 없습니다."}</div>}
+        {groups.length === 0 && <div style={{ color: "#cbd5e1", fontSize: 13, padding: 30 }}>매뉴얼이 없습니다.</div>}
       </div>
     </div>
   );
 }
 
-// ── 업무매뉴얼: 유형별 상세 라우터 ──────────────────────────────────────────────
+// ── 전역 통합검색 (위키·매뉴얼·일과·온보딩 전체를 가로질러 검색) ───────────────────
+function GlobalSearch({ results, onJump, query }) {
+  const modeMeta = (d) => d.type === "wiki" ? { b: "📖 위키", c: "#6366f1" }
+    : d.manualType === "course" ? { b: "🎓 온보딩", c: "#8b5cf6" }
+    : d.manualType === "routine" ? { b: "📅 일과·체크", c: "#16a34a" }
+    : d.manualType === "form" ? { b: "📄 양식", c: "#f59e0b" }
+    : { b: "📋 업무매뉴얼", c: "#6366f1" };
+  const snippet = (d) => {
+    const txt = (d.body || "") + " " + (d.steps || []).map((s) => `${s.title} ${s.desc || ""}`).join(" ") + " " + (d.routine?.items || []).map((i) => i.text).join(" ");
+    const clean = txt.replace(/[#*`>\[\]\-]/g, " ").replace(/\s+/g, " ").trim();
+    const q = query.trim().toLowerCase(); const idx = clean.toLowerCase().indexOf(q);
+    if (idx < 0) return clean.slice(0, 100);
+    const start = Math.max(0, idx - 30);
+    return (start > 0 ? "…" : "") + clean.slice(start, start + 110) + (clean.length > start + 110 ? "…" : "");
+  };
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "18px 26px 40px", background: "#fff" }}>
+      <div style={{ fontSize: 13, color: "#64748b", marginBottom: 14 }}>🔍 <b style={{ color: "#1e293b" }}>"{query}"</b> 통합 검색 — 위키·매뉴얼·일과·온보딩 전체에서 <b style={{ color: "#4338ca" }}>{results.length}건</b></div>
+      {results.length === 0 && <div style={{ color: "#cbd5e1", fontSize: 14, padding: 50, textAlign: "center" }}>검색 결과가 없습니다.<div style={{ fontSize: 12, marginTop: 6 }}>다른 키워드로 찾아보세요.</div></div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 780 }}>
+        {results.map((d) => { const mm = modeMeta(d);
+          return (
+            <div key={d.id} onClick={() => onJump(d)} style={{ display: "flex", gap: 12, padding: "12px 14px", border: "1px solid #e2e8f0", borderRadius: 10, cursor: "pointer", background: "#fff" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = mm.c + "0b"; e.currentTarget.style.borderColor = mm.c + "55"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#e2e8f0"; }}>
+              <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: mm.c, background: mm.c + "15", border: `1px solid ${mm.c}33`, padding: "3px 8px", borderRadius: 8, height: "fit-content", whiteSpace: "nowrap" }}>{mm.b}</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", marginBottom: 2 }}>{d.title} <span style={{ fontSize: 10.5, color: "#94a3b8", fontWeight: 500 }}>· {d.category}</span></div>
+                <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{snippet(d)}</div>
+              </div>
+              <span style={{ flexShrink: 0, alignSelf: "center", color: "#cbd5e1", fontSize: 16 }}>›</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── 📅 일과·체크 보드 (출근·보고 등 반복 체크 — 주기별 정렬) ────────────────────────
+function DailyBoard({ items, onSelect, onNew }) {
+  const CYC = [["daily", "📅 매일", "#6366f1"], ["weekly", "🗓 매주", "#0ea5e9"], ["monthly", "📆 매월", "#8b5cf6"]];
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px", background: "#f8fafc" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 17, fontWeight: 800, color: "#1e293b" }}>📅 일과·체크</span>
+        <span style={{ fontSize: 11.5, color: "#94a3b8" }}>출근·보고·정리 등 매일/주간/월간 반복 업무 — 주기가 바뀌면 자동 초기화. (매뉴얼과 분리된 '실행 체크')</span>
+        <button onClick={onNew} style={{ marginLeft: "auto", background: "#16a34a", color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ 새 체크</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16, marginTop: 14, alignItems: "start" }}>
+        {CYC.map(([cyc, label, color]) => {
+          const list = items.filter((d) => (d.routine?.cycle || "daily") === cyc);
+          return (
+            <div key={cyc} style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: `3px solid ${color}`, borderRadius: 12, boxShadow: "0 2px 10px #00000010", overflow: "hidden" }}>
+              <div style={{ padding: "10px 14px", background: color + "0e", display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 800, color: "#1e293b" }}>{label}</span>
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "#94a3b8" }}>{list.length}</span>
+              </div>
+              <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 7 }}>
+                {list.map((d) => { const its = d.routine?.items || []; const done = its.filter((i) => i.done).length; const pct = its.length ? Math.round(done / its.length * 100) : 0;
+                  return (
+                    <div key={d.id} onClick={() => onSelect(d.id)} style={{ padding: "10px 12px", borderRadius: 10, cursor: "pointer", border: "1px solid #f1f5f9", background: "#fff" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "#f0fdf4"; e.currentTarget.style.borderColor = "#bbf7d0"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#f1f5f9"; }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</span>
+                        <span style={{ fontSize: 10.5, color: pct === 100 ? "#16a34a" : "#94a3b8", fontWeight: 700, flexShrink: 0 }}>{done}/{its.length}{pct === 100 ? " ✓" : ""}</span>
+                      </div>
+                      <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: pct + "%", background: "linear-gradient(90deg,#22c55e,#16a34a)" }} /></div>
+                    </div>
+                  );
+                })}
+                {list.length === 0 && <div style={{ fontSize: 11, color: "#cbd5e1", padding: "12px 4px", textAlign: "center" }}>없음</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── 절차형: 읽는 설명 문서 (무엇/왜/어떻게/예시 — 체크·완료버튼 없음) ─────────────────
+function ProcedureView({ doc, docs, onEdit, onDelete, onSelect, onBack }) {
+  const [confirmDel, setConfirmDel] = useState(false);
+  const comps = mdComponents(docs, onSelect, () => {});
+  const steps = doc.steps || [];
+  return (
+    <div style={{ flex: 1, overflowY: "auto", minHeight: 0, background: "#fff" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 22px", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0, background: "#fff", zIndex: 1, flexWrap: "wrap" }}>
+        <button onClick={onBack} style={backBtn}>← 목록</button>
+        <span style={{ fontSize: 18 }}>📋</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: "#1e293b" }}>{doc.title}</span>
+        <span style={{ fontSize: 11, color: "#6366f1", background: "#eef2ff", padding: "2px 9px", borderRadius: 10, fontWeight: 700 }}>절차 매뉴얼</span>
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>{doc.category}</span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <button onClick={onEdit} style={{ ...ghostBtn, color: "#4338ca", borderColor: "#c7d2fe", background: "#eef2ff" }}>✏ 편집</button>
+          {confirmDel ? <>
+            <button onClick={() => onDelete(doc.id)} style={{ ...ghostBtn, color: "#fff", background: "#dc2626", border: "none" }}>삭제확인</button>
+            <button onClick={() => setConfirmDel(false)} style={ghostBtn}>취소</button>
+          </> : <button onClick={() => setConfirmDel(true)} style={{ ...ghostBtn, color: "#dc2626" }}>🗑</button>}
+        </span>
+      </div>
+      <div style={{ maxWidth: 840, margin: "0 auto", padding: "18px 26px 50px" }}>
+        {(doc.tags || []).length > 0 && <div style={{ marginBottom: 10 }}>{(doc.tags || []).map((t) => <span key={t} style={{ marginRight: 6, background: "#f1f5f9", padding: "2px 8px", borderRadius: 8, color: "#64748b", fontSize: 11 }}>#{t}</span>)}</div>}
+        {doc.body && <><NumberedTOC body={doc.body} /><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={comps}>{preprocess(doc.body, docs)}</ReactMarkdown></>}
+        {steps.length > 0 && (
+          <div style={{ marginTop: doc.body ? 28 : 0 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 800, color: "#1e293b", margin: "0 0 4px", borderBottom: "2px solid #eef2ff", paddingBottom: 6 }}>📑 진행 절차 <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>· 총 {steps.length}단계</span></h2>
+            {steps.map((s, i) => (
+              <div key={s.id || i} style={{ display: "flex", gap: 14, margin: "18px 0", alignItems: "flex-start" }}>
+                <div style={{ flexShrink: 0, width: 30, height: 30, borderRadius: "50%", background: "#eef2ff", color: "#4338ca", fontWeight: 800, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 2 }}>{i + 1}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15.5, fontWeight: 800, color: "#0f172a", marginBottom: 2 }}>{s.title}</div>
+                  {s.desc ? <div style={{ fontSize: 13.5 }}><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={comps}>{preprocess(s.desc, docs)}</ReactMarkdown></div>
+                    : <div style={{ fontSize: 12.5, color: "#cbd5e1", fontStyle: "italic" }}>설명 미작성 — ✏ 편집에서 무엇/왜/어떻게/예시를 채워주세요.</div>}
+                  {(s.refs || []).length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>{s.refs.map((rt) => { const rd = docs.find((x) => x.title === rt); return <span key={rt} onClick={() => rd && onSelect(rd.id)} style={{ fontSize: 11, color: rd ? "#4338ca" : "#94a3b8", background: "#eef2ff", border: "1px solid #c7d2fe", padding: "2px 8px", borderRadius: 8, cursor: rd ? "pointer" : "default" }}>🔗 {rt}</span>; })}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {!doc.body && steps.length === 0 && <div style={{ color: "#cbd5e1", fontSize: 13, padding: 40, textAlign: "center" }}>아직 내용이 없습니다. ✏ 편집에서 작성하세요.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── 업무매뉴얼: 유형별 상세 라우터 (매뉴얼 = 읽는 설명 문서) ───────────────────────
 function ManualDetail(props) {
   const t = props.doc.manualType || "procedure";
-  if (t === "routine") return <RoutineView {...props} />;
+  if (t === "routine") return <RoutineView {...props} />; // (예외) 옛 데이터 안전 처리
   if (t === "form") return <FormView {...props} />;
-  return <QuestMap {...props} />;
+  return <ProcedureView {...props} />; // 절차 = 설명 문서(무엇/왜/어떻게/예시), 체크·완료버튼 없음
 }
 
 // ── 반복형: 루틴 체크리스트 ─────────────────────────────────────────────────────

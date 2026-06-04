@@ -10,8 +10,12 @@ const TABS = [
   { id: "gantt",     e: "📊", l: "간트" },
   { id: "calendar",  e: "📅", l: "캘린더" },
   { id: "chat",      e: "💬", l: "채팅" },
-  { id: "knowledge", e: "📚", l: "지식센터" },
-  { id: "board",     e: "📋", l: "게시판" },
+  { id: "approval",  e: "🖋", l: "전자결재", grp: "업무" },
+  { id: "daily",     e: "✅", l: "일과·체크" },
+  { id: "knowledge", e: "📖", l: "사내위키", grp: "지식" },
+  { id: "manual",    e: "📒", l: "업무매뉴얼" },
+  { id: "onboarding",e: "🎓", l: "온보딩" },
+  { id: "board",     e: "📋", l: "게시판", grp: "소통" },
   { id: "archive",   e: "📦", l: "보관함" },
 ];
 
@@ -31,13 +35,16 @@ export default function LeftPanel({ tab, setTab, projects = [], allNodes = [], p
           </div>
         </div>
 
-        <nav style={{ padding: "8px 6px 4px" }}>
+        <nav style={{ padding: "8px 6px 4px", overflowY: "auto" }}>
           {TABS.map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "10px 10px", borderRadius: 7, border: "none", background: tab === t.id ? "#ede9fe" : "transparent", color: tab === t.id ? "#6366f1" : M, fontSize: 12, cursor: "pointer", marginBottom: 2, textAlign: "left" }}>
-              <span style={{ fontSize: 14 }}>{t.e}</span>{t.l}
-              {tab === t.id && <div style={{ marginLeft: "auto", width: 3, height: 16, borderRadius: 2, background: "#6366f1" }} />}
-            </button>
+            <div key={t.id}>
+              {t.grp && <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9.5, fontWeight: 800, color: "#64748b", letterSpacing: 1, padding: "9px 10px 5px", marginTop: 7, borderTop: "1px solid #e2e8f0" }}><span style={{ width: 3, height: 11, borderRadius: 2, background: "#6366f1", display: "inline-block" }} />{t.grp}</div>}
+              <button onClick={() => setTab(t.id)}
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderRadius: 7, border: "none", background: tab === t.id ? "#ede9fe" : "transparent", color: tab === t.id ? "#6366f1" : M, fontSize: 12, fontWeight: tab === t.id ? 700 : 400, cursor: "pointer", marginBottom: 1, textAlign: "left" }}>
+                <span style={{ fontSize: 14 }}>{t.e}</span>{t.l}
+                {tab === t.id && <div style={{ marginLeft: "auto", width: 3, height: 16, borderRadius: 2, background: "#6366f1" }} />}
+              </button>
+            </div>
           ))}
         </nav>
 
