@@ -1567,6 +1567,16 @@ const DRIVE_EXCLUDE = (process.env.DRIVE_EXCLUDE ||
   "비번,비밀번호,패스워드,password,passwd,계약서,급여,급여명세,급여대장,연봉,인건비,인사기록,개인정보,주민등록,주민번호,신분증,여권,계좌,통장,카드번호,대외비,기밀,보안서약,이력서,근로계약")
   .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 function driveExcluded(name) { const n = (name || "").toLowerCase(); return DRIVE_EXCLUDE.some((p) => n.includes(p)); }
+// 민감정보 마스킹 — 정상 이름 문서 안에 든 비번·주민번호·카드·계좌를 가림
+function maskSensitive(text) {
+  if (!text) return text;
+  let s = text;
+  s = s.replace(/(비밀번호|비번|패스워드|password|passwd|pwd|pw)\s*[:：=]\s*\S+/gi, "$1: [비밀번호 가림]");
+  s = s.replace(/\b\d{6}[-\s]?[1-4]\d{6}\b/g, "[주민번호 가림]");
+  s = s.replace(/\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g, "[카드번호 가림]");
+  s = s.replace(/(계좌|통장)\s*(번호)?\s*[:：]?\s*\d[\d-]{6,}/g, "$1$2: [계좌번호 가림]");
+  return s;
+}
 const DRIVE_INDEX_PATH = path.join(DATA_DIR, "drive_index.json");
 const DRIVE_DOC_EXT = new Set(["pdf", "docx", "txt", "md", "csv", "pptx", "xlsx", "xls", "hwp", "hwpx"]); // 본문 추출
 const DRIVE_IMG = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "heic", "bmp", "tif", "tiff"]);
@@ -1617,7 +1627,7 @@ async function reindexDrive({ limit = 0, subdir = "" } = {}) {
       const rel = path.relative(src.base, dir);
       const rec = { id: id++, path: full, name: e.name, folder: `${src.label}${rel ? "/" + rel : ""}`, source: src.label, type: driveTypeOf(ext), mtime: stat.mtime.toISOString(), size: stat.size, text: "" };
       if (DRIVE_DOC_EXT.has(ext) && stat.size < 50 * 1024 * 1024) {
-        try { const buf = await fs.promises.readFile(longPath(full)); rec.text = await extractFileText(buf, e.name, ""); if (rec.text) driveStatus.withText++; } catch {}
+        try { const buf = await fs.promises.readFile(longPath(full)); rec.text = maskSensitive(await extractFileText(buf, e.name, "")); if (rec.text) driveStatus.withText++; } catch {}
       }
       idx.push(rec);
       driveStatus.scanned = idx.length;
@@ -1651,7 +1661,7 @@ function searchDriveForChat(query) {
     .slice(0, 2);
   if (!docHits.length) return "";
   let ctx = "";
-  for (const h of docHits) { const d = driveIndex[h.id]; ctx += `\n[회사문서: ${d.name}${d.folder ? ` (${d.folder})` : ""}]\n${(d.text || "").slice(0, 2500)}\n`; }
+  for (const h of docHits) { const d = driveIndex[h.id]; ctx += `\n[회사문서: ${d.name}${d.folder ? ` (${d.folder})` : ""}]\n${maskSensitive((d.text || "").slice(0, 2500))}\n`; }
   return ctx.trim();
 }
 loadDriveIndex();
@@ -1667,13 +1677,13 @@ app.get("/api/drive/search", (req, res) => {
   const q = (req.query.q || "").trim(); const limit = +(req.query.limit || 10);
   if (!driveMini || !q) return res.json([]);
   let hits; try { hits = driveMini.search(q); } catch { hits = []; }
-  res.json(hits.slice(0, limit).map((h) => { const d = driveIndex[h.id] || {}; return { id: h.id, name: d.name, folder: d.folder, path: d.path, type: d.type, mtime: d.mtime, hasText: !!d.text, snippet: (d.text || "").slice(0, 160) }; }));
+  res.json(hits.slice(0, limit).map((h) => { const d = driveIndex[h.id] || {}; return { id: h.id, name: d.name, folder: d.folder, path: d.path, type: d.type, mtime: d.mtime, hasText: !!d.text, snippet: maskSensitive((d.text || "").slice(0, 160)) }; }));
 });
 // 드라이브 문서 전체 본문 (근거 탭에서 클릭 시 주입용)
 app.get("/api/drive/doc", (req, res) => {
   const d = driveIndex.find((x) => String(x.id) === String(req.query.id) || x.path === req.query.path);
   if (!d) return res.status(404).json({ error: "not found" });
-  res.json({ name: d.name, folder: d.folder, type: d.type, text: d.text || "" });
+  res.json({ name: d.name, folder: d.folder, type: d.type, text: maskSensitive(d.text || "") });
 });
 
 // ── SSE 브로드캐스트 스트림 ───────────────────────────────────────────────────
