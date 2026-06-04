@@ -1762,6 +1762,38 @@ function ensureBoardGuides() {
   if (changed) saveJSON(bPostsPath(), posts);
 }
 ensureBoardGuides();
+// 게시판별 예시 게시물 (안내글 외에 실제 예시 1개 — 비어 보이지 않게)
+const BOARD_EXAMPLES = {
+  notice: { title: "6월 상반기 워크샵 안내 (참석 필수)", author: "김용현", avatar: "🧑", tags: ["워크샵"], body: "안녕하세요, 콘텐츠잇다입니다.\n\n## 일정\n- **일시**: 6/20(금) 오후 2시\n- **장소**: 호리존 스튜디오 (3층)\n- **내용**: 상반기 성과 공유 + 하반기 방향 + 저녁 회식\n\n전원 참석입니다. 아래 **필독확인** 눌러주세요 🙏" },
+  free: { title: "오늘 날씨 너무 좋네요 ☀️", author: "송예린", avatar: "🧑‍💼", tags: [], body: "점심에 잠깐 산책이라도 하고 싶은 날씨네요.\n다들 좋은 하루 보내세요!" },
+  suggest: { title: "휴게실에 커피머신 있으면 좋겠어요 ☕", author: "익명", avatar: "🙈", tags: ["복지"], body: "편집 작업이 길어질 때 카페인이 절실합니다 ㅎㅎ\n캡슐 머신 정도면 부담 없을 것 같은데, 검토 부탁드려요." },
+  praise: { title: "김호근 팀장님 감사합니다 🙏", author: "윤서아", avatar: "🧑‍🎨", tags: [], body: "어제 제안서 마감 직전에 디자인 같이 봐주셔서 무사히 제출했어요.\n덕분에 살았습니다. 정말 감사합니다!" },
+  lunch: { title: "회성동 순대국밥 강력추천 🍜", author: "박도현", avatar: "🧑", tags: ["맛집"], body: "회사에서 도보 5분, 양 많고 깊은 맛입니다.\n오늘 **1시 로비 집합**, 같이 가실 분 댓글 주세요!" },
+  event: { title: "신예지 대리님 결혼 소식 💐", author: "김용현", avatar: "🧑", tags: ["경사"], body: "신예지 대리님이 7월에 결혼합니다.\n\n- **일시**: 7/12(토) 오후\n- **장소**: 창원 OO웨딩홀\n\n많은 축하 부탁드립니다 🎉" },
+  request: { title: "세영테크 CF 1차 편집 요청 (마감 6/8)", author: "한지수", avatar: "🧑‍💼", status: "요청", body: "세영테크 무선드라이기 CF 촬영본 드라이브에 업로드했습니다.\n\n- **요청**: 1차 가편\n- **담당**: 오민준 PD\n- **마감**: 6/8\n\n레퍼런스는 댓글에 남길게요." },
+  fixreq: { title: "호리존 키라이트 깜빡임 🔧", author: "오민준", avatar: "🧑", status: "요청", body: "호리존 왼쪽 **키라이트 조명**이 가끔 깜빡입니다.\n촬영 중 끊기면 곤란해서 점검 요청드립니다. (6/10 촬영 전까지)" },
+  booking: { title: "6/10 오후 호리존 촬영 예약 📷", author: "오민준", avatar: "🧑", tags: ["예약"], body: "KACES 홍보영상 촬영으로 호리존 사용합니다.\n\n- **날짜**: 6/10(화)\n- **시간**: 13:00 ~ 18:00\n- **장비**: SONY HXR-NX100 2대, 조명 풀세트" },
+  grant: { title: "2026 청년창업 지원사업 공고 (마감 7/14)", author: "한지수", avatar: "🧑‍💼", tags: ["지원사업"], body: "기업마당에 신규 공고가 떴습니다.\n\n- **지원금**: 최대 7,000만원 (자부담 20%)\n- **마감**: 7/14 18시\n- **대상**: 만 39세 이하 대표\n\n우리 해당 여부 검토 필요. 공고문은 지원사업 봇에 첨부해서 분석 돌려보겠습니다." },
+  edu: { title: "프리미어 색보정 무료 강의 추천 🎓", author: "오민준", avatar: "🧑", tags: ["교육"], body: "유튜브에 색보정 기초~중급 강의가 잘 정리돼 있어요.\n편집팀 신규 분들 보면 도움 될 것 같아 공유합니다." },
+  resource: { title: "제안서 최신 양식 v3 공유 📁", author: "김호근", avatar: "🧑", tags: ["양식"], body: "정성/정량 제안서 최신 양식입니다.\n이번 분기부터 이걸로 통일해주세요. (드라이브 첨부)\n변경점: 회사소개·실적 페이지 디자인 업데이트." },
+  links: { title: "자주 쓰는 사이트 모음 🔗", author: "송예린", avatar: "🧑‍💼", tags: ["링크"], body: "북마크처럼 모아둡니다.\n\n- 기업마당 (지원사업)\n- 인스타 크리에이터 스튜디오\n- 유튜브 스튜디오\n- 홈택스 (세금계산서)\n- 네이버 광고관리" },
+  price: { title: "영상 제작 표준 단가표 💰", author: "김호근", avatar: "🧑", tags: ["단가"], body: "제안서 작성 시 참고용 기준 단가입니다.\n\n| 항목 | 기준 단가 |\n|---|---|\n| 기획·구성 | 50만원~ |\n| 촬영(1일) | 80만원~ |\n| 편집(2~3분) | 100만원~ |\n| 드론 | 50만원~ |\n\n※ 실제는 규모·기간 따라 조정" },
+  portfolio: { title: "성산구청 숏폼 홍보영상 🎞️", author: "오민준", avatar: "🧑", tags: ["포트폴리오"], body: "지난달 납품한 성산구 숏폼입니다. 조회수·반응 좋았습니다.\n제안서 실적 페이지에 활용하면 좋을 것 같아요.\n\n(영상 링크/임베드는 편집 눌러서 추가)" },
+  client: { title: "(주)오니트 거래처 정보 🤝", author: "한지수", avatar: "🧑‍💼", tags: ["거래처"], body: "- **담당**: OOO 부장\n- **과거 작업**: 제로플페스타, 패션쇼 스케치 등 5건\n- **특이사항**: 결제 빠름, 현장 요청 많은 편\n- **연락**: (사내 연락처 참고)" },
+  vault: { title: "회사 공식 인스타 계정 🔑", author: "송예린", avatar: "🧑‍💼", tags: ["계정"], body: "⚠️ 내부 전용 — 외부 공유 금지\n\n- **계정**: @contentitda_official\n- **ID**: contentitda_official\n- **PW**: (여기에 직접 입력 — 이 게시판은 봇/검색에서 제외됩니다)\n\n게시 전 팀장 컨펌 부탁드립니다." },
+};
+function ensureBoardExamples() {
+  const posts = loadJSON(bPostsPath(), []);
+  let changed = false;
+  Object.entries(BOARD_EXAMPLES).forEach(([bid, ex]) => {
+    if (posts.some((p) => p.boardId === bid && (p.tags || []).includes("예시"))) return; // 이미 예시 있으면 스킵
+    const no = Math.max(0, ...posts.filter((p) => p.boardId === bid).map((p) => p.no || 0)) + 1;
+    posts.push({ id: randomUUID().slice(0, 8), no, boardId: bid, title: ex.title, body: ex.body, authorId: "sample", authorName: ex.author, authorAvatar: ex.avatar, anonymous: ex.author === "익명", pinned: false, tags: [...(ex.tags || []), "예시"], attachments: [], driveRefs: [], wikiRefs: [], views: 0, likes: [], readBy: [], status: ex.status || "요청", assignees: [], dueDate: "", priority: "normal", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    changed = true;
+  });
+  if (changed) saveJSON(bPostsPath(), posts);
+}
+ensureBoardExamples();
 function addNoti({ userId, type, postId, boardId, fromName, text }) {
   if (!userId) return;
   const notis = loadJSON(bNotisPath(), []);
@@ -1771,6 +1803,16 @@ function addNoti({ userId, type, postId, boardId, fromName, text }) {
 
 // ── 게시판 CRUD ──
 app.get("/api/boards", (req, res) => res.json(loadJSON(boardsPath(), []).sort((a, b) => (a.order || 0) - (b.order || 0))));
+// 홈 카드용 요약 (게시판 + 글 수 + 최근 글)
+app.get("/api/boards/summary", (req, res) => {
+  const boards = loadJSON(boardsPath(), []).filter((b) => !b.hidden).sort((a, b) => (a.order || 0) - (b.order || 0));
+  const posts = loadJSON(bPostsPath(), []);
+  res.json(boards.map((b) => {
+    const bp = posts.filter((p) => p.boardId === b.id).sort((a, b2) => (b2.createdAt || "").localeCompare(a.createdAt || ""));
+    const latest = bp.find((p) => !p.pinned) || bp[0] || null;
+    return { ...b, count: bp.length, latest: latest ? { title: latest.title, date: latest.createdAt, author: latest.authorName } : null };
+  }));
+});
 app.post("/api/boards", (req, res) => {
   const boards = loadJSON(boardsPath(), []);
   const { name, icon = "📋", color = "#6366f1", group = "기타", type = "post", writePerm = "all", anonymous = false, mustRead = false } = req.body || {};

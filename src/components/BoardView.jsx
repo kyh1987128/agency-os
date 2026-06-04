@@ -51,7 +51,8 @@ export default function BoardView({ humans = [], activeProject = "default" }) {
   const [gq, setGq] = useState("");           // 통합검색어
   const [gres, setGres] = useState(null);     // 통합검색 결과
 
-  const loadBoards = () => fetch(`${API}/api/boards`).then((r) => r.json()).then((d) => { setBoards(d); if (!activeBoard && d.length) setActiveBoard(d[0].id); }).catch(() => {});
+  const loadBoards = () => fetch(`${API}/api/boards`).then((r) => r.json()).then((d) => setBoards(d)).catch(() => {});
+  const goHome = () => { setActiveBoard(null); setView("list"); setSelPostId(null); setCreatingBoard(false); setGq(""); setGres(null); };
   useEffect(() => { loadBoards(); }, []);
   useEffect(() => { if (!me && humans.length) { setMe(humans[0]); localStorage.setItem("boardMe", JSON.stringify(humans[0])); } }, [humans]);
   const loadNotis = () => { if (me) fetch(`${API}/api/notifications/${me.id}`).then((r) => r.json()).then((d) => setNotis(Array.isArray(d) ? d : [])).catch(() => {}); };
@@ -74,7 +75,7 @@ export default function BoardView({ humans = [], activeProject = "default" }) {
       {/* 사이드바 */}
       <div style={{ width: 240, flexShrink: 0, background: "#fff", borderRight: "1px solid #e2e8f0", display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 800, color: "#1e293b" }}>📋 게시판</span>
+          <span onClick={goHome} style={{ fontSize: 14, fontWeight: 800, color: "#1e293b", cursor: "pointer" }}>📋 게시판 홈</span>
           <button onClick={() => { setShowNoti((v) => !v); }} style={{ marginLeft: "auto", position: "relative", border: "none", background: "transparent", cursor: "pointer", fontSize: 16 }}>
             🔔{unread > 0 && <span style={{ position: "absolute", top: -4, right: -6, background: "#ef4444", color: "#fff", fontSize: 9, borderRadius: 8, padding: "0 4px", fontWeight: 700 }}>{unread}</span>}
           </button>
@@ -114,7 +115,7 @@ export default function BoardView({ humans = [], activeProject = "default" }) {
         ) : creatingBoard ? (
           <NewBoardForm onCreate={async (data) => { await fetch(`${API}/api/boards`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }); setCreatingBoard(false); loadBoards(); }} onCancel={() => setCreatingBoard(false)} />
         ) : !board ? (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8" }}>게시판을 선택하세요</div>
+          <BoardHome onOpen={goBoard} />
         ) : view === "write" ? (
           <PostWrite board={board} me={me} humans={humans} onCancel={() => setView("list")} onDone={(p) => { setView("detail"); setSelPostId(p.id); }} />
         ) : view === "detail" && selPostId ? (
@@ -438,6 +439,44 @@ function NotiDropdown({ notis, onClose, onRead, onOpen }) {
         <div key={n.id} onClick={() => onOpen(n)} style={{ padding: "10px 14px", borderBottom: "1px solid #f8fafc", cursor: "pointer", background: n.read ? "#fff" : "#eff6ff" }}>
           <div style={{ fontSize: 12, color: "#334155" }}>{n.type === "comment" ? "💬" : n.type === "mention" ? "@" : "📢"} {n.text}</div>
           <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>{fmtFull(n.createdAt)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 게시판 홈 — 카드 그리드 (왼쪽 리스트 대신 직관적인 진입)
+function BoardHome({ onOpen }) {
+  const [boards, setBoards] = useState([]);
+  useEffect(() => { fetch(`${API}/api/boards/summary`).then((r) => r.json()).then((d) => setBoards(Array.isArray(d) ? d : [])).catch(() => {}); }, []);
+  const groups = boards.reduce((m, b) => { (m[b.group || "기타"] = m[b.group || "기타"] || []).push(b); return m; }, {});
+  return (
+    <div style={{ flex: 1, overflowY: "auto", background: "#f8fafc", padding: "20px 26px 40px" }}>
+      <div style={{ fontSize: 18, fontWeight: 800, color: "#1e293b" }}>📋 게시판</div>
+      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 18 }}>보고 싶은 게시판을 클릭하세요</div>
+      {Object.entries(groups).map(([g, list]) => (
+        <div key={g} style={{ marginBottom: 22 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 10 }}>{g}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 12 }}>
+            {list.map((b) => (
+              <div key={b.id} onClick={() => onOpen(b.id)} style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: `3px solid ${b.color}`, borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 4px #00000010", transition: "transform .12s, box-shadow .12s" }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 6px 18px #00000018"; }} onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 1px 4px #00000010"; }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 22 }}>{b.icon}</span>
+                  <span style={{ fontSize: 14.5, fontWeight: 800, color: "#1e293b" }}>{b.name}</span>
+                  {b.secret ? <span style={{ marginLeft: "auto", fontSize: 9, background: "#fee2e2", color: "#dc2626", padding: "1px 6px", borderRadius: 6 }}>🔒 금고</span>
+                    : b.type === "request" ? <span style={{ marginLeft: "auto", fontSize: 9, background: "#dcfce7", color: "#16a34a", padding: "1px 6px", borderRadius: 6 }}>요청관리</span> : null}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#475569", height: 34, overflow: "hidden", lineHeight: 1.5 }}>
+                  {b.latest ? <>📝 {b.latest.title}</> : <span style={{ color: "#cbd5e1" }}>아직 글이 없습니다</span>}
+                </div>
+                <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 8, display: "flex", justifyContent: "space-between", borderTop: "1px solid #f1f5f9", paddingTop: 7 }}>
+                  <span>글 {b.count}개</span>
+                  {b.latest && <span>{b.latest.author} · {fmtDate(b.latest.date)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>
