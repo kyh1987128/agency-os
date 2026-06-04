@@ -149,7 +149,7 @@ export default function KnowledgeCenter({ humans = [], activeProject = "default"
             <div ref={wikiWrapRef} style={{ flex: 1, display: "flex", minHeight: 0 }}>
               {/* 왼쪽: 제목 목록 내비 — 리사이즈 */}
               <div style={{ width: wikiSplit + "%", minWidth: 200, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                <WikiNav wikis={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "" })} query={query} setQuery={setQuery} selId={selId} />
+                <WikiNav wikis={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "" })} query={query} setQuery={setQuery} selId={selId} favs={favs} />
               </div>
               {/* 리사이즈 바 */}
               <div onMouseDown={startWikiResize} title="드래그해서 너비 조절" style={{ width: 6, flexShrink: 0, cursor: "col-resize", background: "#eef2f7" }}
@@ -745,13 +745,23 @@ function periodKey(cycle, d = new Date()) {
 }
 
 // ── 사내위키: 왼쪽 제목 목록 내비 (말줄임·세로 스크롤만) ──────────────────────────
-function WikiNav({ wikis, onSelect, onNew, query, setQuery, selId }) {
+function WikiNav({ wikis, onSelect, onNew, query, setQuery, selId, favs = [] }) {
   const [open, setOpen] = useState({});
   const groups = useMemo(() => {
     const m = {}; wikis.forEach((d) => { (m[d.category || "미분류"] ||= []).push(d); });
     return Object.entries(m).sort((a, b) => b[1].length - a[1].length);
   }, [wikis]);
-  const isOpen = (c) => open[c] !== false;
+  const selCat = useMemo(() => (wikis.find((d) => d.id === selId) || {}).category, [wikis, selId]);
+  const isOpen = (c) => (open[c] !== undefined ? open[c] : c === selCat); // 기본 접힘 · 현재 문서 분류만 자동 펼침
+  const favDocs = wikis.filter((d) => favs.includes(d.id));
+  const recent = useMemo(() => [...wikis].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "")).slice(0, 5), [wikis]);
+  const searching = !!query.trim();
+  const Row = ({ d, indent }) => { const on = d.id === selId;
+    return (
+      <div onClick={() => onSelect(d.id)} title={d.title} style={{ fontSize: 12, color: on ? "#4338ca" : "#475569", fontWeight: on ? 700 : 400, background: on ? "#eef2ff" : "transparent", padding: `5px 8px 5px ${indent}px`, cursor: "pointer", borderRadius: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "#eef2ff66"; }} onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>{d.title}</div>
+    );
+  };
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#fafbfd", borderRight: "1px solid #e2e8f0" }}>
       <div style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", flexShrink: 0 }}>
@@ -762,28 +772,42 @@ function WikiNav({ wikis, onSelect, onNew, query, setQuery, selId }) {
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="🔍 검색" style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 12, outline: "none", color: "#1e293b" }} />
       </div>
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "6px 5px 20px" }}>
-        {groups.map(([cat, docs]) => {
-          const c = catColor(cat), o = isOpen(cat);
-          return (
-            <div key={cat} style={{ marginBottom: 1 }}>
-              <div onClick={() => setOpen((p) => ({ ...p, [cat]: p[cat] === false ? true : false }))} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 8px", cursor: "pointer", borderRadius: 6 }}>
-                <span style={{ fontSize: 9, color: "#94a3b8", width: 8, flexShrink: 0 }}>{o ? "▾" : "▸"}</span>
-                <span style={{ width: 7, height: 7, borderRadius: 2, background: c, flexShrink: 0 }} />
-                <span style={{ fontSize: 12.5, fontWeight: 700, color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{CAT_ICON[cat] || "📁"} {cat}</span>
-                <span style={{ marginLeft: "auto", fontSize: 10, color: "#cbd5e1", flexShrink: 0 }}>{docs.length}</span>
+        {searching ? (
+          <>
+            {wikis.map((d) => <Row key={d.id} d={d} indent={10} />)}
+            {wikis.length === 0 && <div style={{ fontSize: 11, color: "#cbd5e1", padding: 16, textAlign: "center" }}>검색 결과 없음</div>}
+          </>
+        ) : (
+          <>
+            {favDocs.length > 0 && (
+              <div style={{ marginBottom: 4 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", padding: "4px 8px" }}>⭐ 즐겨찾기</div>
+                {favDocs.map((d) => <Row key={d.id} d={d} indent={16} />)}
               </div>
-              {o && docs.map((d) => { const on = d.id === selId;
-                return (
-                  <div key={d.id} onClick={() => onSelect(d.id)} title={d.title} style={{ fontSize: 12, color: on ? "#4338ca" : "#475569", fontWeight: on ? 700 : 400, background: on ? "#eef2ff" : "transparent", padding: "5px 8px 5px 25px", cursor: "pointer", borderRadius: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                    onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "#eef2ff66"; }} onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>
-                    {d.title}
-                  </div>
-                );
-              })}
+            )}
+            <div style={{ marginBottom: 4 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", padding: "4px 8px" }}>🕒 최근</div>
+              {recent.map((d) => <Row key={d.id} d={d} indent={16} />)}
             </div>
-          );
-        })}
-        {groups.length === 0 && <div style={{ fontSize: 11, color: "#cbd5e1", padding: 16, textAlign: "center" }}>{query ? "검색 결과 없음" : "문서 없음"}</div>}
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", padding: "8px 8px 4px", borderTop: "1px solid #eef2f7", marginTop: 4 }}>분류</div>
+            {groups.map(([cat, docs]) => {
+              const c = catColor(cat), o = isOpen(cat);
+              return (
+                <div key={cat} style={{ marginBottom: 1 }}>
+                  <div onClick={() => setOpen((p) => ({ ...p, [cat]: !(p[cat] !== undefined ? p[cat] : cat === selCat) }))} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 8px", cursor: "pointer", borderRadius: 6 }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#eef2f7")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                    <span style={{ fontSize: 9, color: "#94a3b8", width: 8, flexShrink: 0 }}>{o ? "▾" : "▸"}</span>
+                    <span style={{ width: 7, height: 7, borderRadius: 2, background: c, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{CAT_ICON[cat] || "📁"} {cat}</span>
+                    <span style={{ marginLeft: "auto", fontSize: 10, color: "#cbd5e1", flexShrink: 0 }}>{docs.length}</span>
+                  </div>
+                  {o && docs.map((d) => <Row key={d.id} d={d} indent={25} />)}
+                </div>
+              );
+            })}
+            {groups.length === 0 && <div style={{ fontSize: 11, color: "#cbd5e1", padding: 16, textAlign: "center" }}>문서 없음</div>}
+          </>
+        )}
       </div>
     </div>
   );
