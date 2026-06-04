@@ -738,11 +738,14 @@ function WikiHome({ wikis, onSelect, onNew, query, setQuery, favs }) {
   const toggle = (cat) => setOpenCats((p) => ({ ...p, [cat]: p[cat] === false ? true : false }));
   const ago = (iso) => { if (!iso) return ""; const s = (Date.now() - new Date(iso).getTime()) / 1000; if (s < 60) return "방금"; if (s < 3600) return Math.floor(s / 60) + "분 전"; if (s < 86400) return Math.floor(s / 3600) + "시간 전"; return Math.floor(s / 86400) + "일 전"; };
   return (
-    <div style={{ flex: 1, overflowY: "auto", background: "#fff" }}>
-      <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 28px 50px" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <span style={{ fontSize: 18, fontWeight: 800, color: "#1e293b" }}>📖 사내위키</span>
-          <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ 새 위키</button>
+    <div style={{ flex: 1, overflowY: "auto", background: "linear-gradient(180deg,#fbfcff,#fff 220px)" }}>
+      <div style={{ maxWidth: 1240, margin: "0 auto", padding: "22px 32px 50px" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#1e293b" }}>📖 사내위키</div>
+            <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 3 }}>회사의 모든 지식이 여기 있어요. 검색하거나 아래에서 골라보세요 👇</div>
+          </div>
+          <button onClick={onNew} style={{ marginLeft: "auto", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, padding: "8px 15px", fontSize: 12, fontWeight: 700, cursor: "pointer", boxShadow: "0 2px 8px #6366f155" }}>+ 새 위키</button>
         </div>
         {/* 큰 검색 */}
         <div style={{ position: "relative", marginBottom: 18 }}>
