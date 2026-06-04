@@ -47,7 +47,7 @@ const md = {
   hr: () => <hr style={{ border: "none", borderTop: "1px solid #f1f5f9", margin: "8px 0" }} />,
 };
 
-export default function ChatView({ activeProject = "default" }) {
+export default function ChatView({ activeProject = "default", handoff = null }) {
   const [activeBot, setActiveBot] = useState("director");
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
@@ -59,6 +59,8 @@ export default function ChatView({ activeProject = "default" }) {
   const [templateForm, setTemplateForm] = useState(null);  // 슬래시 템플릿 폼 {tpl, values}
   const [pendingHandoff, setPendingHandoff] = useState(null); // 봇→봇 인계 {bot,text,label}
   const [checkedQ, setCheckedQ] = useState({});            // 품질체크 토글 {`${bot}:${i}`:true}
+  const [wikiDocs, setWikiDocs] = useState([]);            // 사내위키 문서 (근거 탭)
+  const [wikiQuery, setWikiQuery] = useState("");
   const fileInputRef = useRef(null);
   const bottomRef = useRef(null);
   const activeBotRef = useRef(activeBot);
@@ -280,6 +282,14 @@ export default function ChatView({ activeProject = "default" }) {
     }
   }, [pendingHandoff, activeBot]); // eslint-disable-line
 
+  // 외부(지식센터 퀘스트)에서 "봇에게 시키기" → 해당 봇으로 전환 + 자동 전송
+  useEffect(() => {
+    if (!handoff || !handoff.botId) return;
+    setPendingHandoff({ bot: handoff.botId, text: handoff.message, label: handoff.label || handoff.message });
+    setCockpitTab("guide");
+    setActiveBot(handoff.botId);
+  }, [handoff?.nonce]); // eslint-disable-line
+
   // 인계 카드(사람용) — 요약 요청 (클릭 시 1회 호출)
   const makeHandoffCard = () => {
     if (isTyping) return;
@@ -287,6 +297,37 @@ export default function ChatView({ activeProject = "default" }) {
       "지금까지 진행한 이 업무를 다음 담당자가 이어받을 수 있도록 정리해줘. 형식: ① 업무 요약(2~3줄) ② 완료한 것 ③ 산출물 ④ 다음 할 일.",
       "📋 업무 인계 카드 만들기"
     );
+  };
+
+  // ── 근거 탭: 사내위키 검색·참조 (위키 → 채팅) ──
+  useEffect(() => {
+    if (cockpitTab === "evidence" && wikiDocs.length === 0) {
+      fetch(`${API}/api/wiki`).then((r) => r.json()).then((d) => setWikiDocs(Array.isArray(d) ? d : [])).catch(() => {});
+    }
+  }, [cockpitTab]); // eslint-disable-line
+  const docText = (d) => d.body || (d.steps || []).map((s) => `${s.title}: ${s.desc || ""}`).join("\n");
+  const wikiResults = (() => {
+    const q = wikiQuery.trim().toLowerCase();
+    if (!q) return wikiDocs.slice(0, 12);
+    return wikiDocs.filter((d) => (`${d.title} ${d.category} ${(d.tags || []).join(" ")} ${docText(d)}`).toLowerCase().includes(q)).slice(0, 20);
+  })();
+  // 위키 문서를 근거로 현재 봇에게 묻기
+  const askWithDoc = (d) => {
+    const body = docText(d).slice(0, 6000);
+    const q = input.trim() || "이 사내 자료를 참고해서 지금 업무에 어떻게 활용하면 좋을지 알려줘.";
+    setInput("");
+    sendMessage(`아래 사내 문서를 근거로 답해줘.\n\n# ${d.title}\n${body}\n\n[요청] ${q}`, `📖 위키 "${d.title}" 참조 · ${q}`);
+  };
+  // 현재 산출물을 사내위키에 새 문서로 저장 (채팅 → 위키)
+  const saveToWiki = async () => {
+    if (!artifact) { flash("저장할 결과물이 없어요"); return; }
+    try {
+      const r = await fetch(`${API}/api/wiki`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "wiki", title: artifactTitle || `${cur.name} 결과`, category: cur.name, body: `# ${artifactTitle}\n\n${artifact}`, tags: [cur.name] }),
+      });
+      if (r.ok) { const doc = await r.json(); setWikiDocs((p) => [doc, ...p]); flash("📖 위키에 저장됨!"); } else flash("위키 저장 실패");
+    } catch { flash("위키 저장 실패"); }
   };
 
   return (
@@ -517,11 +558,17 @@ export default function ChatView({ activeProject = "default" }) {
               {/* 다음 액션 */}
               <Section title="👉 다음 액션">
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                  {guide.starters.map((s, i) => (
-                    <button key={i} disabled={isTyping} onClick={() => sendMessage(s.prompt)} style={{ ...cock(isTyping), textAlign: "left", padding: "7px 10px" }}>
-                      › {s.label}
-                    </button>
-                  ))}
+                  {msgs.length === 0 ? (
+                    <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6, padding: "2px 2px 4px" }}>
+                      👈 가운데 <b style={{ color: "#6366f1" }}>시작 버튼</b>을 누르거나 메시지를 입력해 시작하세요.
+                    </div>
+                  ) : (
+                    guide.starters.map((s, i) => (
+                      <button key={i} disabled={isTyping} onClick={() => sendMessage(s.prompt)} style={{ ...cock(isTyping), textAlign: "left", padding: "7px 10px" }}>
+                        › {s.label}
+                      </button>
+                    ))
+                  )}
                   {guide.nextBots.map((nb) => (
                     <button key={nb} disabled={!artifact} onClick={() => handoffTo(nb)} title="현재 결과물을 함께 넘깁니다" style={{ ...cock(!artifact), textAlign: "left", padding: "7px 10px", background: artifact ? "#fff7ed" : "#f8fafc", borderColor: "#fed7aa", color: artifact ? "#c2410c" : "#94a3b8" }}>
                       ↪ {BOT_MAP[nb]?.icon} {BOT_MAP[nb]?.name}에게 넘기기
@@ -560,6 +607,7 @@ export default function ChatView({ activeProject = "default" }) {
                 ))}
                 <button disabled={!artifact} onClick={saveToKanban} style={{ ...cock(!artifact), background: artifact ? "#eef2ff" : "#f8fafc", color: artifact ? "#4338ca" : "#94a3b8", borderColor: "#c7d2fe" }}>📌 칸반</button>
                 <button disabled={!artifact} onClick={saveToTodo} style={{ ...cock(!artifact), background: artifact ? "#f0fdf4" : "#f8fafc", color: artifact ? "#16a34a" : "#94a3b8", borderColor: "#bbf7d0" }}>✅ 할일</button>
+                <button disabled={!artifact} onClick={saveToWiki} title="결과물을 사내위키에 저장" style={{ ...cock(!artifact), background: artifact ? "#fefce8" : "#f8fafc", color: artifact ? "#a16207" : "#94a3b8", borderColor: "#fde68a" }}>📖 위키</button>
               </div>
             </div>
           </>
@@ -593,13 +641,37 @@ export default function ChatView({ activeProject = "default" }) {
           </div>
         )}
 
-        {/* 📎 근거 (다음 단계) */}
+        {/* 📎 근거 — 사내위키 검색·참조 */}
         {cockpitTab === "evidence" && (
-          <div style={cockEmpty}>
-            <div style={{ fontSize: 30, marginBottom: 8 }}>📎</div>
-            <b style={{ color: "#64748b" }}>근거·출처</b><br />
-            봇 답변의 웹검색 출처와<br />사내위키 근거를 표시합니다.<br />
-            <span style={{ color: "#cbd5e1" }}>(위키 연결 후 제공)</span>
+          <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column" }}>
+            <div style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>사내위키 근거</div>
+            <input
+              value={wikiQuery}
+              onChange={(e) => setWikiQuery(e.target.value)}
+              placeholder="🔍 사내위키·매뉴얼 검색"
+              style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 12, outline: "none", color: "#1e293b", marginBottom: 10 }}
+            />
+            {wikiDocs.length === 0 && (
+              <div style={{ fontSize: 11, color: "#cbd5e1", textAlign: "center", padding: "16px 0" }}>사내위키 문서가 없습니다.<br />왼쪽 '지식센터'에서 추가하세요.</div>
+            )}
+            {wikiResults.map((d) => (
+              <div key={d.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#fff" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                  <span>{d.type === "manual" ? "📋" : "📖"}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</span>
+                </div>
+                <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 6 }}>{d.category}</div>
+                <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.5, maxHeight: 48, overflow: "hidden", marginBottom: 8 }}>
+                  {docText(d).replace(/[#*`>\[\]!()]/g, "").replace(/\n+/g, " ").slice(0, 90)}
+                </div>
+                <button disabled={isTyping} onClick={() => askWithDoc(d)} style={{ ...cock(isTyping), width: "100%", background: isTyping ? "#f8fafc" : "#eef2ff", borderColor: "#c7d2fe", color: isTyping ? "#94a3b8" : "#4338ca", fontWeight: 700 }}>
+                  🤖 이 문서로 묻기
+                </button>
+              </div>
+            ))}
+            {wikiQuery && wikiResults.length === 0 && wikiDocs.length > 0 && (
+              <div style={{ fontSize: 11, color: "#cbd5e1", textAlign: "center", padding: "16px 0" }}>검색 결과 없음</div>
+            )}
           </div>
         )}
       </div>
