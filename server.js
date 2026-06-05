@@ -92,6 +92,28 @@ function loadHumans() {
 function saveHumans(data) {
   fs.writeFileSync(path.join(DATA_DIR, "humans.json"), JSON.stringify(data, null, 2), "utf8");
 }
+// 배포/최초 실행 시 기본 구성원 시드 + 이메일·권한 백필 (humans.json은 gitignore라 코드로 보장)
+const DEFAULT_HUMANS = [
+  { id: "h1", deptId: "marketing", name: "한지수", title: "브랜드 전략가",  avatar: "👩‍💼", color: "#f59e0b", status: "active", mood: "집중모드 🎯",     email: "jisoo@contentitda.co.kr",    role: "admin" },
+  { id: "h2", deptId: "marketing", name: "박도현", title: "SNS 매니저",     avatar: "👨‍💻", color: "#f59e0b", status: "active", mood: "트렌드 스캐닝 📱", email: "dohyun@contentitda.co.kr",   role: "member" },
+  { id: "h3", deptId: "content",   name: "오민준", title: "영상 PD",        avatar: "🎬",  color: "#38bdf8", status: "active", mood: "스토리보드 작성 📋", email: "minjun@contentitda.co.kr",   role: "member" },
+  { id: "h4", deptId: "design",    name: "윤서아", title: "UI/UX 디자이너", avatar: "🎨",  color: "#f472b6", status: "active", mood: "와이어프레임 중 📐", email: "seoa@contentitda.co.kr",     role: "member" },
+  { id: "h5", deptId: "dev",       name: "남현석", title: "프론트엔드",      avatar: "⚡",  color: "#34d399", status: "active", mood: "코드 리뷰 중 💻",   email: "hyunseok@contentitda.co.kr", role: "member" },
+  { id: "h6", deptId: "ops",       name: "송예린", title: "PM",             avatar: "📋",  color: "#fb923c", status: "active", mood: "스탠드업 준비 📅",   email: "yerin@contentitda.co.kr",    role: "member" },
+];
+function ensureHumans() {
+  let humans = loadHumans();
+  if (!Array.isArray(humans) || humans.length === 0) { saveHumans(DEFAULT_HUMANS); return; }
+  const seedByName = Object.fromEntries(DEFAULT_HUMANS.map((h) => [h.name, h]));
+  let changed = false;
+  humans = humans.map((h) => {
+    const s = seedByName[h.name];
+    if (s && (!h.email || !h.role)) { changed = true; return { ...h, email: h.email || s.email, role: h.role || s.role }; }
+    return h;
+  });
+  if (changed) saveHumans(humans);
+}
+ensureHumans();
 
 // ── projects_data 헬퍼 (projects_data.json — 기존 loadProjData와 동일 파일) ──
 function loadProjectsData() {
@@ -2910,6 +2932,18 @@ app.delete("/api/approvals/:id", (req, res) => {
 app.get("/health", (_, res) => {
   res.json({ status: "ok", message: "Agency OS server running" });
 });
+
+// ── 프로덕션: 빌드된 프론트엔드(dist) 서빙 + SPA 폴백 (단일 서버 배포용) ──
+// dev에서는 dist가 없으니 자동 비활성(Vite가 5174에서 서빙). build 후에는 한 서버가 앱+API 제공.
+const DIST_DIR = path.join(process.cwd(), "dist");
+if (fs.existsSync(DIST_DIR)) {
+  app.use(express.static(DIST_DIR));
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api") || req.path.startsWith("/uploads") || req.path === "/health") return next();
+    res.sendFile(path.join(DIST_DIR, "index.html"));
+  });
+  console.log("   [배포] dist/ 정적 서빙 활성화");
+}
 
 app.listen(PORT, () => {
   console.log(`\n Agency OS Server`);
