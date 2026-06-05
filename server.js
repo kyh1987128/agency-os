@@ -2860,6 +2860,21 @@ app.post("/api/users/:id/password", (req, res) => {
   res.json({ ok: true, user: pubUser(humans[idx]) });
 });
 
+// POST /api/register { name, email, password, code } — 회원가입(공개 노출 대비 가입 코드 필요)
+const REGISTER_CODE = process.env.REGISTER_CODE || "cidhub2026";
+app.post("/api/register", (req, res) => {
+  if (_loginLimited(req)) return res.status(429).json({ error: "시도가 너무 많습니다. 잠시 후 다시 시도하세요" });
+  const { name, email, password, code } = req.body || {};
+  if (!name?.trim() || !email?.trim() || !password) return res.status(400).json({ error: "이름·이메일·비밀번호를 모두 입력하세요" });
+  if (String(password).length < 4) return res.status(400).json({ error: "비밀번호는 4자 이상이어야 합니다" });
+  if (String(code || "").trim() !== REGISTER_CODE) return res.status(403).json({ error: "회사 가입 코드가 올바르지 않습니다" });
+  const humans = loadHumans();
+  if (humans.some((h) => (h.email || "").toLowerCase() === String(email).toLowerCase().trim())) return res.status(409).json({ error: "이미 가입된 이메일입니다. 로그인하세요" });
+  const human = { id: "h_" + randomUUID().slice(0, 8), name: name.trim(), email: String(email).toLowerCase().trim(), title: "", deptId: "", avatar: "👤", color: "#6366f1", status: "active", mood: "", role: "member", passwordHash: hashPw(password) };
+  humans.push(human); saveHumans(humans);
+  res.json({ ok: true, user: pubUser(human) });
+});
+
 // ════════════════════════════════════════════════════════════════════════════════
 // Projects Data API (/api/projects-data)
 // ════════════════════════════════════════════════════════════════════════════════

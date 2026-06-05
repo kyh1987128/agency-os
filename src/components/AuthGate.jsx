@@ -30,7 +30,22 @@ function LoginScreen({ onLogin }) {
   const [setupName, setSetupName] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
 
+  const register = async () => {
+    setErr("");
+    if (!name.trim() || !email.trim() || !pw) return setErr("이름·이메일·비밀번호를 입력하세요");
+    if (pw.length < 4) return setErr("비밀번호는 4자 이상이어야 합니다");
+    if (pw !== pw2) return setErr("비밀번호가 서로 다릅니다");
+    setBusy(true);
+    try {
+      const r = await fetch("/api/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password: pw, code }) });
+      const j = await r.json();
+      if (!r.ok) { setErr(j.error || "가입 실패"); setBusy(false); return; }
+      onLogin(j.user);
+    } catch { setErr("서버에 연결할 수 없습니다"); setBusy(false); }
+  };
   const login = async () => {
     setErr(""); setBusy(true);
     try {
@@ -60,17 +75,30 @@ function LoginScreen({ onLogin }) {
         <div style={{ textAlign: "center", marginBottom: 22 }}>
           <div style={{ width: 48, height: 48, margin: "0 auto 10px", background: "linear-gradient(135deg,#6366f1,#38bdf8)", borderRadius: 13, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 25 }}>🏢</div>
           <div style={{ fontSize: 19, fontWeight: 800, color: "#1e293b" }}>Agency OS</div>
-          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>{mode === "setup" ? `${setupName}님, 비밀번호를 설정하세요` : "사내 로그인"}</div>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>{mode === "setup" ? `${setupName}님, 비밀번호를 설정하세요` : mode === "register" ? "회원가입" : "사내 로그인"}</div>
         </div>
-        {mode === "login" ? (
+        {mode === "login" && (
           <>
             <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="이메일" autoFocus style={inp} onKeyDown={(e) => e.key === "Enter" && login()} />
             <input value={pw} onChange={(e) => setPw(e.target.value)} type="password" placeholder="비밀번호" style={inp} onKeyDown={(e) => e.key === "Enter" && login()} />
             {err && <div style={{ color: "#dc2626", fontSize: 12, marginBottom: 10 }}>{err}</div>}
-            <div style={{ display: "flex" }}><button onClick={login} disabled={busy} style={pbtn}>{busy ? "확인 중…" : "로그인"}</button></div>
-            <div style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", marginTop: 13, lineHeight: 1.5 }}>처음이신가요? 이메일만 입력하고 로그인을 누르면<br />비밀번호를 설정할 수 있어요.</div>
+            <button onClick={login} disabled={busy} style={pbtn}>{busy ? "확인 중…" : "로그인"}</button>
+            <div style={{ fontSize: 12.5, color: "#64748b", textAlign: "center", marginTop: 14 }}>계정이 없으세요? <span onClick={() => { setMode("register"); setErr(""); setPw(""); setPw2(""); }} style={{ color: "#6366f1", fontWeight: 700, cursor: "pointer" }}>회원가입</span></div>
           </>
-        ) : (
+        )}
+        {mode === "register" && (
+          <>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="이름" autoFocus style={inp} />
+            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="이메일" style={inp} />
+            <input value={pw} onChange={(e) => setPw(e.target.value)} type="password" placeholder="비밀번호 (4자 이상)" style={inp} />
+            <input value={pw2} onChange={(e) => setPw2(e.target.value)} type="password" placeholder="비밀번호 확인" style={inp} />
+            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="회사 가입 코드" style={inp} onKeyDown={(e) => e.key === "Enter" && register()} />
+            {err && <div style={{ color: "#dc2626", fontSize: 12, marginBottom: 10 }}>{err}</div>}
+            <button onClick={register} disabled={busy} style={pbtn}>{busy ? "가입 중…" : "회원가입하고 시작"}</button>
+            <div style={{ fontSize: 12.5, color: "#64748b", textAlign: "center", marginTop: 14 }}>이미 계정이 있으세요? <span onClick={() => { setMode("login"); setErr(""); }} style={{ color: "#6366f1", fontWeight: 700, cursor: "pointer" }}>로그인</span></div>
+          </>
+        )}
+        {mode === "setup" && (
           <>
             <input value={pw} onChange={(e) => setPw(e.target.value)} type="password" placeholder="새 비밀번호 (4자 이상)" autoFocus style={inp} />
             <input value={pw2} onChange={(e) => setPw2(e.target.value)} type="password" placeholder="새 비밀번호 확인" style={inp} onKeyDown={(e) => e.key === "Enter" && setup()} />
