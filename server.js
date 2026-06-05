@@ -2772,16 +2772,20 @@ app.get("/api/humans", (req, res) => {
   res.json(loadHumans().map(({ passwordHash, ...h }) => ({ ...h, hasPassword: !!passwordHash })));
 });
 
-// POST /api/humans
+// POST /api/humans (관리자 직원 추가 — email·role·연락처 포함, 비번은 첫 로그인 시 본인 설정)
 app.post("/api/humans", (req, res) => {
-  const { name, title, avatar, deptId, color } = req.body;
-  if (!name?.trim()) return res.status(400).json({ error: "name required" });
+  const { name, title, avatar, deptId, color, email, role, phone, bio } = req.body || {};
+  if (!name?.trim()) return res.status(400).json({ error: "이름을 입력하세요" });
   const humans = loadHumans();
+  if (email && humans.some((h) => (h.email || "").toLowerCase() === String(email).toLowerCase().trim())) return res.status(409).json({ error: "이미 등록된 이메일입니다" });
   const human = {
     id: `h_${randomUUID().slice(0, 8)}`,
     name: name.trim(), title: title || "", avatar: avatar || "👤",
     deptId: deptId || "", color: color || "#6366f1",
     status: "active", mood: "",
+    email: email ? String(email).toLowerCase().trim() : "",
+    role: role === "admin" ? "admin" : "member",
+    phone: phone || "", bio: bio || "",
   };
   humans.push(human);
   saveHumans(humans);
