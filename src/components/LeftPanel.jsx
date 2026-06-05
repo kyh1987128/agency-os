@@ -17,7 +17,7 @@ const TABS = [
   { id: "onboarding",e: "🎓", l: "온보딩" },
   { id: "board",     e: "📋", l: "게시판", grp: "소통" },
   { id: "archive",   e: "📦", l: "보관함" },
-  { id: "settings",  e: "⚙️", l: "설정", grp: "계정" },
+  { id: "settings",  e: "🏢", l: "설정·오피스", grp: "계정" },
 ];
 
 export { TABS };

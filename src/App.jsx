@@ -173,7 +173,7 @@ export default function App() {
       ) : tab === "settings" ? (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <div style={{ padding: "10px 14px", borderBottom: "1px solid " + BR, background: "#ffffff", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: T }}>⚙️ 설정 <span style={{ fontSize: 10, color: M, fontWeight: 400 }}>· 내 프로필 · 구성원 · 관리</span></span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: T }}>🏢 설정 · 2.5D 오피스 <span style={{ fontSize: 10, color: M, fontWeight: 400 }}>· 프로필 · 구성원 · 회사정보 · 캐릭터</span></span>
             <span style={{ fontSize: 10, color: M }}>{new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" })}</span>
           </div>
           <SettingsView departments={departments} onHumansChange={() => fetch(`${API}/api/humans`).then((r) => r.json()).then((d) => setHumans(Array.isArray(d) ? d : [])).catch(() => {})} />

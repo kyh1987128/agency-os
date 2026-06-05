@@ -2800,8 +2800,25 @@ app.patch("/api/humans/:id", (req, res) => {
   const { passwordHash, ...body } = req.body || {};
   humans[idx] = { ...humans[idx], ...body };
   saveHumans(humans);
+  broadcastMessage({ type: "data_update", resource: "humans" }); // 오피스 실시간 동기화
   const { passwordHash: _ph, ...out } = humans[idx];
   res.json({ ...out, hasPassword: !!humans[idx].passwordHash });
+});
+
+// ── 회사 정보 (이름·주소·대표·로고·바로가기 링크) ──────────────────────────────
+const COMPANY_DEFAULT = { name: "콘텐츠잇다", address: "", ceo: "", bizno: "", phone: "", email: "", logo: "", intro: "", links: [] };
+function loadCompany() {
+  const fp = path.join(DATA_DIR, "company.json");
+  if (!fs.existsSync(fp)) return { ...COMPANY_DEFAULT };
+  try { return { ...COMPANY_DEFAULT, ...JSON.parse(fs.readFileSync(fp, "utf8")) }; } catch { return { ...COMPANY_DEFAULT }; }
+}
+function saveCompany(d) { fs.writeFileSync(path.join(DATA_DIR, "company.json"), JSON.stringify(d, null, 2), "utf8"); }
+app.get("/api/company", (_, res) => res.json(loadCompany()));
+app.patch("/api/company", (req, res) => {
+  const c = { ...loadCompany(), ...(req.body || {}) };
+  saveCompany(c);
+  broadcastMessage({ type: "data_update", resource: "company" });
+  res.json(c);
 });
 
 // DELETE /api/humans/:id
