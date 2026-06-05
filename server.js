@@ -1718,14 +1718,24 @@ const DEFAULT_BOARDS = [
   // 보안
   { id: "vault", name: "공유 계정", icon: "🔑", color: "#dc2626", group: "보안", type: "post", writePerm: "all", secret: true },
 ];
+// 게시판별 말머리(글 분류)
+const BOARD_FLAIRS = {
+  notice: ["설문", "이슈", "AD"], free: ["잡담", "질문", "후기", "정보"], suggest: ["건의", "불만", "아이디어"],
+  praise: ["칭찬", "감사"], lunch: ["맛집", "점심모집"], event: ["경사", "조사"],
+  request: ["편집", "디자인", "촬영", "기타"], fixreq: ["조명", "카메라", "음향", "공간"], booking: ["호리존", "크리에이팅룸", "카메라"],
+  grant: ["공고", "마감임박", "결과"], edu: ["강의", "세미나", "자격증"], resource: ["양식", "레퍼런스", "체크리스트"],
+  links: ["업무", "마케팅", "행정"], price: ["영상", "디자인"], portfolio: ["영상", "디자인", "행사"],
+  client: ["거래처", "협력사"], vault: ["SNS", "구독서비스", "기타"],
+};
 function ensureBoards() {
-  const def = (b, i) => ({ color: "#6366f1", group: "기타", type: "post", writePerm: "all", anonymous: false, mustRead: false, secret: false, hidden: false, ...b, order: i + 1 });
+  const def = (b, i) => ({ color: "#6366f1", group: "기타", type: "post", writePerm: "all", anonymous: false, mustRead: false, secret: false, hidden: false, flairs: BOARD_FLAIRS[b.id] || [], ...b, order: i + 1 });
   let boards = loadJSON(boardsPath(), null);
   if (!boards) { saveJSON(boardsPath(), DEFAULT_BOARDS.map(def)); return; }
   const ids = new Set(boards.map((b) => b.id));
-  let added = false;
-  DEFAULT_BOARDS.forEach((b, i) => { if (!ids.has(b.id)) { boards.push(def(b, boards.length)); added = true; } });
-  if (added) saveJSON(boardsPath(), boards);
+  let changed = false;
+  DEFAULT_BOARDS.forEach((b, i) => { if (!ids.has(b.id)) { boards.push(def(b, boards.length)); changed = true; } });
+  boards.forEach((b) => { if ((!b.flairs || !b.flairs.length) && BOARD_FLAIRS[b.id]) { b.flairs = BOARD_FLAIRS[b.id]; changed = true; } }); // 말머리 마이그레이션
+  if (changed) saveJSON(boardsPath(), boards);
 }
 ensureBoards();
 // 게시판별 사용안내 글 (비어있는 게시판에만 1회 시드)
@@ -1753,10 +1763,11 @@ function ensureBoardGuides() {
   const boards = loadJSON(boardsPath(), []);
   let changed = false;
   boards.forEach((b) => {
-    if (posts.some((p) => p.boardId === b.id)) return; // 이미 글 있으면 스킵
+    if (posts.some((p) => p.boardId === b.id && (p.authorId === "system" || (p.tags || []).includes("안내")))) return; // 이미 안내글 있으면 스킵
     const guide = BOARD_GUIDES[b.id];
     if (!guide) return;
-    posts.push({ id: randomUUID().slice(0, 8), no: 1, boardId: b.id, title: "📌 " + (guide.split("\n")[0].replace(/^#+\s*/, "")), body: guide, authorId: "system", authorName: "운영", authorAvatar: "🛠️", anonymous: false, pinned: true, tags: ["안내"], attachments: [], driveRefs: [], wikiRefs: [], views: 0, likes: [], readBy: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    const no = Math.max(0, ...posts.filter((p) => p.boardId === b.id).map((p) => p.no || 0)) + 1;
+    posts.push({ id: randomUUID().slice(0, 8), no, boardId: b.id, title: "📌 " + (guide.split("\n")[0].replace(/^#+\s*/, "")), body: guide, authorId: "system", authorName: "운영", authorAvatar: "🛠️", anonymous: false, pinned: true, tags: ["안내"], attachments: [], driveRefs: [], wikiRefs: [], views: 0, likes: [], readBy: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     changed = true;
   });
   if (changed) saveJSON(bPostsPath(), posts);
@@ -1794,6 +1805,19 @@ function ensureBoardExamples() {
   if (changed) saveJSON(bPostsPath(), posts);
 }
 ensureBoardExamples();
+// 기존 글에 말머리 배정 (안내=공지, 그 외=게시판 첫 말머리)
+function ensurePostFlairs() {
+  const posts = loadJSON(bPostsPath(), []);
+  const bf = Object.fromEntries(loadJSON(boardsPath(), []).map((b) => [b.id, b.flairs || []]));
+  let changed = false;
+  posts.forEach((p) => {
+    if (p.flair !== undefined && p.flair !== null && p.flair !== "") return;
+    p.flair = (p.tags || []).includes("안내") ? "공지" : ((bf[p.boardId] || [])[0] || "");
+    changed = true;
+  });
+  if (changed) saveJSON(bPostsPath(), posts);
+}
+ensurePostFlairs();
 function addNoti({ userId, type, postId, boardId, fromName, text }) {
   if (!userId) return;
   const notis = loadJSON(bNotisPath(), []);
@@ -1803,6 +1827,19 @@ function addNoti({ userId, type, postId, boardId, fromName, text }) {
 
 // ── 게시판 CRUD ──
 app.get("/api/boards", (req, res) => res.json(loadJSON(boardsPath(), []).sort((a, b) => (a.order || 0) - (b.order || 0))));
+// 실시간 전체글 (디씨 메인 피드 — 모든 게시판 최근글, 금고 제외)
+app.get("/api/posts/recent", (req, res) => {
+  const limit = +(req.query.limit || 30);
+  const boards = loadJSON(boardsPath(), []);
+  const secret = new Set(boards.filter((b) => b.secret).map((b) => b.id));
+  const bm = Object.fromEntries(boards.map((b) => [b.id, b]));
+  const comments = loadJSON(bCommentsPath(), []);
+  const cc = {}; comments.forEach((c) => { cc[c.postId] = (cc[c.postId] || 0) + 1; });
+  const posts = loadJSON(bPostsPath(), []).filter((p) => !secret.has(p.boardId))
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).slice(0, limit)
+    .map((p) => ({ id: p.id, boardId: p.boardId, boardName: bm[p.boardId]?.name, boardIcon: bm[p.boardId]?.icon, title: p.title, author: p.authorName, avatar: p.authorAvatar, date: p.createdAt, views: p.views || 0, likes: (p.likes || []).length, comments: cc[p.id] || 0, hasThumb: (p.attachments || []).some((f) => f.mime?.startsWith("image/")), thumb: (p.attachments || []).find((f) => f.mime?.startsWith("image/"))?.url }));
+  res.json(posts);
+});
 // 홈 카드용 요약 (게시판 + 글 수 + 최근 글)
 app.get("/api/boards/summary", (req, res) => {
   const boards = loadJSON(boardsPath(), []).filter((b) => !b.hidden).sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -1833,16 +1870,19 @@ app.delete("/api/boards/:id", (req, res) => {
 
 // ── 글 목록 (페이지네이션 + 검색) ──
 app.get("/api/boards/:bid/posts", (req, res) => {
-  const { page = 1, size = 20, q = "" } = req.query;
+  const { page = 1, size = 20, q = "", filter = "전체", flair = "" } = req.query;
   let posts = loadJSON(bPostsPath(), []).filter((p) => p.boardId === req.params.bid);
   if (q.trim()) { const s = q.trim().toLowerCase(); posts = posts.filter((p) => (`${p.title} ${p.body} ${p.authorName}`).toLowerCase().includes(s)); }
+  if (flair && flair !== "전체") posts = posts.filter((p) => p.flair === flair);
   posts.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-  const pinned = posts.filter((p) => p.pinned);
-  const rest = posts.filter((p) => !p.pinned);
+  const cc = {}; loadJSON(bCommentsPath(), []).forEach((c) => { cc[c.postId] = (cc[c.postId] || 0) + 1; });
+  const strip = (p) => ({ ...p, body: undefined, commentCount: cc[p.id] || 0 });
   const pg = Math.max(1, +page), sz = +size;
-  const pageItems = rest.slice((pg - 1) * sz, pg * sz);
-  const strip = (p) => ({ ...p, body: undefined, commentCount: loadJSON(bCommentsPath(), []).filter((c) => c.postId === p.id).length });
-  res.json({ pinned: pinned.map(strip), posts: pageItems.map(strip), total: rest.length, page: pg, size: sz, pages: Math.ceil(rest.length / sz) });
+  const paged = (list) => ({ pinned: [], posts: list.slice((pg - 1) * sz, pg * sz).map(strip), total: list.length, page: pg, size: sz, pages: Math.ceil(list.length / sz) });
+  if (filter === "공지") return res.json(paged(posts.filter((p) => p.pinned)));
+  if (filter === "개념") return res.json(paged(posts.filter((p) => (p.likes || []).length >= 3)));
+  const pinned = posts.filter((p) => p.pinned), rest = posts.filter((p) => !p.pinned);
+  res.json({ ...paged(rest), pinned: pinned.map(strip) });
 });
 
 // ── 글 작성 ──
@@ -1850,11 +1890,11 @@ app.post("/api/boards/:bid/posts", (req, res) => {
   const posts = loadJSON(bPostsPath(), []);
   const boards = loadJSON(boardsPath(), []);
   const board = boards.find((b) => b.id === req.params.bid);
-  const { title, body = "", authorId, authorName = "익명", authorAvatar = "🧑", anonymous = false, tags = [], attachments = [], driveRefs = [], wikiRefs = [], mentions = [], status = "요청", assignees = [], dueDate = "", priority = "normal" } = req.body || {};
+  const { title, body = "", flair = "", authorId, authorName = "익명", authorAvatar = "🧑", anonymous = false, tags = [], attachments = [], driveRefs = [], wikiRefs = [], mentions = [], status = "요청", assignees = [], dueDate = "", priority = "normal" } = req.body || {};
   if (!title) return res.status(400).json({ error: "title required" });
   const no = Math.max(0, ...posts.filter((p) => p.boardId === req.params.bid).map((p) => p.no || 0)) + 1;
   const now = new Date().toISOString();
-  const post = { id: randomUUID().slice(0, 8), no, boardId: req.params.bid, title, body, authorId, authorName: anonymous ? "익명" : authorName, authorAvatar: anonymous ? "🙈" : authorAvatar, anonymous, pinned: false, tags, attachments, driveRefs, wikiRefs, views: 0, likes: [], readBy: [], status, assignees, dueDate, priority, createdAt: now, updatedAt: now };
+  const post = { id: randomUUID().slice(0, 8), no, boardId: req.params.bid, title, body, flair, authorId, authorName: anonymous ? "익명" : authorName, authorAvatar: anonymous ? "🙈" : authorAvatar, anonymous, pinned: false, tags, attachments, driveRefs, wikiRefs, views: 0, likes: [], readBy: [], status, assignees, dueDate, priority, createdAt: now, updatedAt: now };
   posts.unshift(post); saveJSON(bPostsPath(), posts);
   // @멘션 알림
   (mentions || []).forEach((uid) => addNoti({ userId: uid, type: "mention", postId: post.id, boardId: post.boardId, fromName: authorName, text: `${board?.name || ""} "${title}"에서 회원님을 멘션` }));
@@ -2794,6 +2834,32 @@ app.patch("/api/projects-data/:id", (req, res) => {
 app.delete("/api/projects-data/:id", (req, res) => {
   const projects = loadProjectsData();
   saveProjectsData(projects.filter(p => p.id !== req.params.id));
+  res.json({ ok: true });
+});
+
+// ── 전자결재(기안·결재) ───────────────────────────────────────────────────────
+const approvalsPath = () => path.join(DATA_DIR, "approvals.json");
+app.get("/api/approvals", (_req, res) => { res.json(loadJSON(approvalsPath(), [])); });
+app.post("/api/approvals", (req, res) => {
+  const list = loadJSON(approvalsPath(), []);
+  const now = new Date().toISOString();
+  const doc = { ...req.body, id: req.body.id || ("ap" + Date.now().toString(36) + Math.floor(Math.random() * 1e3)), createdAt: req.body.createdAt || now, updatedAt: now };
+  list.unshift(doc); saveJSON(approvalsPath(), list);
+  broadcastMessage({ type: "data_update", resource: "approvals" });
+  res.status(201).json(doc);
+});
+app.patch("/api/approvals/:id", (req, res) => {
+  const list = loadJSON(approvalsPath(), []);
+  const idx = list.findIndex((d) => d.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "not found" });
+  list[idx] = { ...list[idx], ...req.body, id: list[idx].id, updatedAt: new Date().toISOString() };
+  saveJSON(approvalsPath(), list);
+  broadcastMessage({ type: "data_update", resource: "approvals" });
+  res.json(list[idx]);
+});
+app.delete("/api/approvals/:id", (req, res) => {
+  saveJSON(approvalsPath(), loadJSON(approvalsPath(), []).filter((d) => d.id !== req.params.id));
+  broadcastMessage({ type: "data_update", resource: "approvals" });
   res.json({ ok: true });
 });
 

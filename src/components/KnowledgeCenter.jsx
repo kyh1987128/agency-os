@@ -169,8 +169,16 @@ export default function KnowledgeCenter({ humans = [], activeProject = "default"
           ) : query.trim() ? (
             <GlobalSearch results={globalResults} onJump={jumpTo} query={query} />
           ) : mode === "daily" ? (
-            sel ? <RoutineView doc={sel} patchDoc={patchDoc} onEdit={startEdit} onDelete={delDoc} onBack={() => setSelId(null)} />
-              : <DailyBoard items={results} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "총무", manualType: "routine" })} />
+            <div ref={wikiWrapRef} style={{ flex: 1, display: "flex", minHeight: 0 }}>
+              <div style={{ width: wikiSplit + "%", minWidth: 220, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <DailyNav items={results} selId={selId} onSelect={selectDoc} onNew={() => setCreating({ title: "", category: "총무", manualType: "routine" })} />
+              </div>
+              <div onMouseDown={startWikiResize} title="드래그해서 너비 조절" style={{ width: 6, flexShrink: 0, cursor: "col-resize", background: "#eef2f7" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#c7d2fe")} onMouseLeave={(e) => (e.currentTarget.style.background = "#eef2f7")} />
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0, background: "#fff" }}>
+                {sel ? <RoutineView doc={sel} docs={docs} patchDoc={patchDoc} onEdit={startEdit} onDelete={delDoc} onBack={() => setSelId(null)} />
+                  : <DailyWelcome items={results} onSelect={selectDoc} />}
+              </div>
+            </div>
           ) : mode === "onboarding" ? (
             <div ref={wikiWrapRef} style={{ flex: 1, display: "flex", minHeight: 0 }}>
               <div style={{ width: wikiSplit + "%", minWidth: 220, display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -1271,45 +1279,74 @@ function GlobalSearch({ results, onJump, query }) {
   );
 }
 
-// ── 📅 일과·체크 보드 (출근·보고 등 반복 체크 — 주기별 정렬) ────────────────────────
-function DailyBoard({ items, onSelect, onNew }) {
-  const CYC = [["daily", "📅 매일", "#6366f1"], ["weekly", "🗓 매주", "#0ea5e9"], ["monthly", "📆 매월", "#8b5cf6"]];
+// ── 📅 일과·체크 좌측 내비 (매일/매주/매월 그룹 + 진행률) ───────────────────────────
+const DAILY_CYC = [["daily", "📅 매일", "#6366f1"], ["weekly", "🗓 매주", "#0ea5e9"], ["monthly", "📆 매월", "#8b5cf6"]];
+function DailyNav({ items, selId, onSelect, onNew }) {
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px", background: "#f8fafc" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 17, fontWeight: 800, color: "#1e293b" }}>📅 일과·체크</span>
-        <span style={{ fontSize: 11.5, color: "#94a3b8" }}>출근·보고·정리 등 매일/주간/월간 반복 업무 — 주기가 바뀌면 자동 초기화. (매뉴얼과 분리된 '실행 체크')</span>
-        <button onClick={onNew} style={{ marginLeft: "auto", background: "#16a34a", color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ 새 체크</button>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#fff" }}>
+      <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 800, color: "#1e293b" }}>📅 일과·체크</span>
+        <button onClick={onNew} style={{ marginLeft: "auto", background: "#16a34a", color: "#fff", border: "none", borderRadius: 7, padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>+ 새 체크</button>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16, marginTop: 14, alignItems: "start" }}>
-        {CYC.map(([cyc, label, color]) => {
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px 20px" }}>
+        {DAILY_CYC.map(([cyc, label, color]) => {
           const list = items.filter((d) => (d.routine?.cycle || "daily") === cyc);
+          if (!list.length) return null;
           return (
-            <div key={cyc} style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: `3px solid ${color}`, borderRadius: 12, boxShadow: "0 2px 10px #00000010", overflow: "hidden" }}>
-              <div style={{ padding: "10px 14px", background: color + "0e", display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 800, color: "#1e293b" }}>{label}</span>
-                <span style={{ marginLeft: "auto", fontSize: 10, color: "#94a3b8" }}>{list.length}</span>
-              </div>
-              <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 7 }}>
-                {list.map((d) => { const its = d.routine?.items || []; const done = its.filter((i) => i.done).length; const pct = its.length ? Math.round(done / its.length * 100) : 0;
-                  return (
-                    <div key={d.id} onClick={() => onSelect(d.id)} style={{ padding: "10px 12px", borderRadius: 10, cursor: "pointer", border: "1px solid #f1f5f9", background: "#fff" }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = "#f0fdf4"; e.currentTarget.style.borderColor = "#bbf7d0"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#f1f5f9"; }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</span>
-                        <span style={{ fontSize: 10.5, color: pct === 100 ? "#16a34a" : "#94a3b8", fontWeight: 700, flexShrink: 0 }}>{done}/{its.length}{pct === 100 ? " ✓" : ""}</span>
-                      </div>
-                      <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: pct + "%", background: "linear-gradient(90deg,#22c55e,#16a34a)" }} /></div>
+            <div key={cyc} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color, padding: "5px 8px 4px", display: "flex", alignItems: "center", gap: 5 }}>{label}<span style={{ marginLeft: "auto", color: "#cbd5e1" }}>{list.length}</span></div>
+              {list.map((d) => {
+                const its = d.routine?.items || []; const done = its.filter((i) => i.done).length; const pct = its.length ? Math.round(done / its.length * 100) : 0; const on = selId === d.id;
+                return (
+                  <div key={d.id} onClick={() => onSelect(d.id)} style={{ padding: "9px 10px", borderRadius: 9, cursor: "pointer", marginBottom: 2, background: on ? "#ecfdf5" : "transparent", border: "1px solid " + (on ? "#bbf7d0" : "transparent") }}
+                    onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "#f8fafc"; }} onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                      <span style={{ fontSize: 12.5, fontWeight: on ? 800 : 600, color: on ? "#16a34a" : "#334155", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: pct === 100 ? "#16a34a" : "#94a3b8", flexShrink: 0 }}>{done}/{its.length}{pct === 100 ? " ✓" : ""}</span>
                     </div>
-                  );
-                })}
-                {list.length === 0 && <div style={{ fontSize: 11, color: "#cbd5e1", padding: "12px 4px", textAlign: "center" }}>없음</div>}
-              </div>
+                    <div style={{ height: 5, background: "#f1f5f9", borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: pct + "%", background: "linear-gradient(90deg,#22c55e,#16a34a)" }} /></div>
+                  </div>
+                );
+              })}
             </div>
           );
         })}
+        {items.length === 0 && <div style={{ fontSize: 11, color: "#cbd5e1", padding: "20px 10px", textAlign: "center" }}>체크 항목이 없습니다.<br />+ 새 체크로 추가하세요.</div>}
       </div>
+    </div>
+  );
+}
+
+// ── 📅 일과·체크 우측 환영(미선택) — 오늘 할 체크 요약 ─────────────────────────────
+function DailyWelcome({ items, onSelect }) {
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "30px 34px 50px", background: "#f0fdf4" }}>
+      <div style={{ fontSize: 19, fontWeight: 800, color: "#14532d" }}>📅 일과·체크</div>
+      <div style={{ fontSize: 12.5, color: "#16a34a", marginTop: 5, marginBottom: 22, lineHeight: 1.6 }}>출근·보고·정리 등 매일/주간/월간 반복 업무입니다. 주기가 바뀌면 자동 초기화돼요.<br />왼쪽에서 항목을 선택하면 <b>가이드와 체크리스트</b>가 열립니다.</div>
+      {DAILY_CYC.map(([cyc, label, color]) => {
+        const list = items.filter((d) => (d.routine?.cycle || "daily") === cyc);
+        if (!list.length) return null;
+        return (
+          <div key={cyc} style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color, marginBottom: 8 }}>{label}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 10 }}>
+              {list.map((d) => { const its = d.routine?.items || []; const done = its.filter((i) => i.done).length; const pct = its.length ? Math.round(done / its.length * 100) : 0;
+                return (
+                  <div key={d.id} onClick={() => onSelect(d.id)} style={{ background: "#fff", border: "1px solid #d1fae5", borderRadius: 11, padding: "12px 14px", cursor: "pointer", boxShadow: "0 1px 4px #00000008" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 4px 14px #16a34a22"; e.currentTarget.style.borderColor = "#86efac"; }} onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "0 1px 4px #00000008"; e.currentTarget.style.borderColor = "#d1fae5"; }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 700, color: "#14532d", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color: pct === 100 ? "#16a34a" : "#94a3b8" }}>{done}/{its.length}{pct === 100 ? " 🎉" : ""}</span>
+                    </div>
+                    <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: pct + "%", background: "linear-gradient(90deg,#22c55e,#16a34a)" }} /></div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      {items.length === 0 && <div style={{ fontSize: 12.5, color: "#94a3b8", marginTop: 10 }}>아직 체크 항목이 없습니다. 왼쪽 <b>+ 새 체크</b>로 추가하세요.</div>}
     </div>
   );
 }
@@ -1368,9 +1405,10 @@ function ManualDetail(props) {
   return <ProcedureView {...props} />; // 절차 = 설명 문서(무엇/왜/어떻게/예시), 체크·완료버튼 없음
 }
 
-// ── 반복형: 루틴 체크리스트 ─────────────────────────────────────────────────────
-function RoutineView({ doc, patchDoc, onEdit, onDelete, onBack }) {
+// ── 반복형: 루틴 체크리스트 (+ 가이드 본문) ──────────────────────────────────────
+function RoutineView({ doc, docs = [], patchDoc, onEdit, onDelete, onBack }) {
   const [confirmDel, setConfirmDel] = useState(false);
+  const comps = mdComponents(docs, () => {}, () => {});
   const r = doc.routine || { cycle: "daily", items: [] };
   const items = r.items || [];
   // 주기 도래 시 자동 초기화 (열 때 1회 판정)
@@ -1405,6 +1443,13 @@ function RoutineView({ doc, patchDoc, onEdit, onDelete, onBack }) {
         <div style={{ height: "100%", width: pct + "%", background: "linear-gradient(90deg,#22c55e,#16a34a)", borderRadius: 6, transition: "width .3s" }} />
       </div>
       <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 700, marginBottom: 14 }}>{done}/{items.length} 완료 · {pct}%{pct === 100 ? " 🎉 끝!" : ""}{autoReset && <span style={{ marginLeft: 8, color: "#0ea5e9", fontWeight: 600 }}>↻ 새 {cycleKo(r.cycle)} 시작 — 자동 초기화됨</span>}</div>
+      {doc.body && (
+        <div style={{ maxWidth: 640, background: "#fff", border: "1px solid #d1fae5", borderRadius: 12, padding: "14px 18px", marginBottom: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#16a34a", marginBottom: 4, letterSpacing: 0.5 }}>📋 가이드</div>
+          <div style={{ fontSize: 13 }}><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={comps}>{preprocess(doc.body, docs)}</ReactMarkdown></div>
+        </div>
+      )}
+      <div style={{ fontSize: 12.5, fontWeight: 800, color: "#14532d", marginBottom: 8, maxWidth: 560 }}>✅ 체크리스트</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 560 }}>
         {items.map((it, i) => (
           <label key={i} style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 14px", background: "#fff", border: "1px solid " + (it.done ? "#bbf7d0" : "#e2e8f0"), borderRadius: 10, cursor: "pointer" }}>

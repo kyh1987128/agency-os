@@ -8,6 +8,21 @@ body { background: #f1f5f9; color: #1e293b; font-family: system-ui, -apple-syste
 button { font-family: inherit; }
 select { font-family: inherit; outline: none; }
 
+/* 전자결재 문서 인쇄 — 문서(.approval-doc)만 출력 */
+@media print {
+  body * { visibility: hidden; }
+  .approval-doc, .approval-doc * { visibility: visible; }
+  .approval-doc { position: absolute; left: 0; top: 0; width: 100% !important; max-width: 100% !important; box-shadow: none !important; border: none !important; padding: 0 8mm !important; }
+  .no-print { display: none !important; }
+}
+
+/* 게시판 사이드바 — 스크롤바 항상 보이게 (자료·보안 그룹까지 스크롤 인지) */
+.board-scroll { scrollbar-width: thin; scrollbar-color: #c7d2fe #f8fafc; }
+.board-scroll::-webkit-scrollbar { width: 9px; }
+.board-scroll::-webkit-scrollbar-track { background: #f8fafc; }
+.board-scroll::-webkit-scrollbar-thumb { background: #c7d2fe; border-radius: 5px; border: 2px solid #f8fafc; }
+.board-scroll::-webkit-scrollbar-thumb:hover { background: #a5b4fc; }
+
 /* hover utility classes */
 .row-hover { transition: background 0.12s; }
 .row-hover:hover { background: #f1f5f9 !important; }
