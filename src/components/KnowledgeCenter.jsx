@@ -5,8 +5,79 @@ import rehypeRaw from "rehype-raw";
 import MiniSearch from "minisearch";
 import { ReactFlow, Background, Controls, MiniMap, Handle, Position } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import mermaid from "mermaid";
 
 const API = "";
+
+// ── Mermaid 다이어그램 (본문 ```mermaid 코드블록을 그림으로 렌더) ───────────────────
+let _mermaidInit = false;
+function Mermaid({ code }) {
+  const ref = useRef(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    if (!_mermaidInit) { try { mermaid.initialize({ startOnLoad: false, securityLevel: "loose", fontFamily: "system-ui,-apple-system,sans-serif", theme: "base", themeVariables: { primaryColor: "#eef2ff", primaryBorderColor: "#6366f1", primaryTextColor: "#1e293b", lineColor: "#94a3b8", secondaryColor: "#f0fdf4", tertiaryColor: "#fffbeb", fontSize: "13px" } }); } catch {} _mermaidInit = true; }
+    let alive = true;
+    const id = "mmd" + Math.floor(Math.random() * 1e9);
+    mermaid.render(id, code).then(({ svg }) => { if (alive && ref.current) { ref.current.innerHTML = svg; setErr(false); } }).catch(() => { if (alive) setErr(true); });
+    return () => { alive = false; };
+  }, [code]);
+  if (err) return <pre style={{ background: "#fef2f2", color: "#b91c1c", padding: "10px 12px", borderRadius: 8, fontSize: 11.5, overflowX: "auto" }}>{"⚠ 다이어그램 표시 오류\n" + code}</pre>;
+  return <div ref={ref} className="mermaid-diagram" style={{ display: "flex", justifyContent: "center", margin: "16px 0", overflowX: "auto", background: "#fafbfd", border: "1px solid #eef2f7", borderRadius: 10, padding: 14 }} />;
+}
+
+// ── 스텝퍼 (```steps: "이모지|제목|설명" 줄 단위 → 번호 카드 흐름) ──────────────────
+const STEP_COLORS = ["#6366f1", "#8b5cf6", "#0ea5e9", "#14b8a6", "#16a34a", "#f59e0b", "#ef4444", "#ec4899"];
+function Stepper({ code }) {
+  const steps = code.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const p = l.split("|").map((x) => x.trim());
+    let icon = "", title = "", desc = "";
+    if (p.length >= 3) { icon = p[0]; title = p[1]; desc = p.slice(2).join(" · "); }
+    else if (p.length === 2) { if ([...p[0]].length <= 2) { icon = p[0]; title = p[1]; } else { title = p[0]; desc = p[1]; } }
+    else { title = p[0]; }
+    return { icon, title, desc };
+  });
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch", gap: 8, margin: "18px 0" }}>
+      {steps.map((s, i) => { const c = STEP_COLORS[i % STEP_COLORS.length];
+        return (
+          <div key={i} style={{ display: "flex", alignItems: "stretch", flex: "1 1 150px", minWidth: 138 }}>
+            <div style={{ flex: 1, background: "#fff", border: `1px solid ${c}33`, borderTop: `3px solid ${c}`, borderRadius: 10, padding: "10px 12px", boxShadow: "0 1px 4px #0000000a", display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 22, height: 22, borderRadius: "50%", background: c, color: "#fff", fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</span>
+                {s.icon && <span style={{ fontSize: 16 }}>{s.icon}</span>}
+                <span style={{ fontSize: 13, fontWeight: 800, color: "#1e293b", lineHeight: 1.25 }}>{s.title}</span>
+              </div>
+              {s.desc && <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.5 }}>{s.desc}</div>}
+            </div>
+            {i < steps.length - 1 && <div style={{ display: "flex", alignItems: "center", color: "#cbd5e1", fontSize: 16, padding: "0 1px", flexShrink: 0 }}>→</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── 타임라인 (```timeline: "시점|제목|설명" 줄 단위 → 세로 타임라인) ────────────────
+function Timeline({ code }) {
+  const items = code.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { const p = l.split("|").map((x) => x.trim()); return { when: p[0] || "", title: p[1] || "", desc: p.slice(2).join(" · ") }; });
+  return (
+    <div style={{ margin: "18px 0", paddingLeft: 6 }}>
+      {items.map((it, i) => (
+        <div key={i} style={{ display: "flex", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+            <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#6366f1", border: "2px solid #c7d2fe", zIndex: 1, marginTop: 2 }} />
+            {i < items.length - 1 && <div style={{ width: 2, flex: 1, background: "#e2e8f0", minHeight: 18 }} />}
+          </div>
+          <div style={{ paddingBottom: i < items.length - 1 ? 14 : 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#6366f1" }}>{it.when}</div>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1e293b" }}>{it.title}</div>
+            {it.desc && <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.55, marginTop: 2 }}>{it.desc}</div>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const BOTS = [
   { id: "saup", name: "사업계획서 봇", icon: "📑" },
@@ -32,7 +103,7 @@ function ytId(url) {
   return m ? m[1] : null;
 }
 function preprocess(body, docs) {
-  let s = body || "";
+  let s = typeof body === "string" ? body : (body && typeof body === "object" && typeof body.value === "string" ? body.value : "");
   const stash = [];
   s = s.replace(/```[\s\S]*?```|`[^`\n]*`/g, (m) => { stash.push(m); return `@@CODE${stash.length - 1}@@`; });
   s = s.replace(/\{\{youtube:([\w-]{11})\}\}/g, (_, id) => ytIframe(id));
@@ -597,7 +668,20 @@ function mdComponents(docs, onSelect, onNewByTitle) {
     td: ({ children }) => <td style={{ border: "1px solid #e2e8f0", padding: "7px 10px", color: "#334155" }}>{children}</td>,
     img: ({ src, alt }) => <img src={src} alt={alt} style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid #e2e8f0", margin: "6px 0" }} />,
     blockquote: ({ children }) => <blockquote style={{ borderLeft: "3px solid #c7d2fe", paddingLeft: 12, margin: "10px 0", color: "#64748b" }}>{children}</blockquote>,
-    code: ({ children }) => <code style={{ background: "#f1f5f9", padding: "1px 5px", borderRadius: 4, fontSize: 12.5, color: "#db2777" }}>{children}</code>,
+    pre: ({ children }) => {
+      const child = Array.isArray(children) ? children[0] : children;
+      const cls = child?.props?.className || "";
+      const raw = child?.props?.children;
+      const text = typeof raw === "string" ? raw : Array.isArray(raw) ? raw.join("") : String(raw ?? "");
+      if (cls.includes("language-mermaid")) return <Mermaid code={text.trim()} />;
+      if (cls.includes("language-steps")) return <Stepper code={text.trim()} />;
+      if (cls.includes("language-timeline")) return <Timeline code={text.trim()} />;
+      return <pre style={{ background: "#0f172a", color: "#e2e8f0", padding: "12px 14px", borderRadius: 8, overflowX: "auto", fontSize: 12.5, lineHeight: 1.6, margin: "10px 0" }}>{children}</pre>;
+    },
+    code: ({ className, children }) => {
+      if (className && className.startsWith("language-")) return <code style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace", fontSize: 12.5, color: "#e2e8f0", whiteSpace: "pre" }}>{children}</code>;
+      return <code style={{ background: "#f1f5f9", padding: "1px 5px", borderRadius: 4, fontSize: 12.5, color: "#db2777" }}>{children}</code>;
+    },
     a: ({ href, children }) => {
       if (href && href.startsWith("#wiki:")) { const id = href.slice(6).split("#")[0]; return <a onClick={(e) => { e.preventDefault(); onSelect(id); }} style={{ color: "#4338ca", background: "#eef2ff", padding: "1px 5px", borderRadius: 4, cursor: "pointer", textDecoration: "none", fontWeight: 600 }}>{children}</a>; }
       if (href && href.startsWith("#wikinew:")) { const t = decodeURIComponent(href.slice(9)); return <a onClick={(e) => { e.preventDefault(); onNewByTitle(t); }} title="없는 문서 — 클릭해 새로 만들기" style={{ color: "#dc2626", borderBottom: "1px dashed #fca5a5", cursor: "pointer", textDecoration: "none" }}>{children}</a>; }
@@ -734,7 +818,7 @@ const btnGhost = { border: "1px solid #e2e8f0", background: "#fff", borderRadius
 // ── 도구 패널 (위키) ────────────────────────────────────────────────────────────
 function ToolPanel({ doc, docs, onSelect }) {
   const toc = useMemo(() => { const out = []; (doc.body || "").split("\n").forEach((ln) => { const m = ln.match(/^(#{1,3})\s+(.+)/); if (m) out.push({ lvl: m[1].length, text: m[2].trim() }); }); return out; }, [doc]);
-  const backlinks = useMemo(() => docs.filter((d) => d.id !== doc.id && ((d.body || "").includes(`[[${doc.title}]]`) || (d.steps || []).some((s) => (s.desc || "").includes(`[[${doc.title}]]`) || (s.refs || []).includes(doc.title)))), [docs, doc]);
+  const backlinks = useMemo(() => docs.filter((d) => d.id !== doc.id && (String((d.body && d.body.value) || d.body || "").includes(`[[${doc.title}]]`) || (d.steps || []).some((s) => String(s.desc || "").includes(`[[${doc.title}]]`) || (s.refs || []).includes(doc.title)))), [docs, doc]);
   const L = { fontSize: 9.5, fontWeight: 700, color: "#94a3b8", letterSpacing: 0.5, textTransform: "uppercase", margin: "0 0 6px" };
   return (
     <div style={{ width: 220, flexShrink: 0, background: "#fff", borderLeft: "1px solid #e2e8f0", display: "flex", flexDirection: "column", minHeight: 0 }}>
