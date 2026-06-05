@@ -140,17 +140,26 @@ export default function ApprovalView({ humans = [] }) {
 
 // ── M: 양식 갤러리 (작성) — 검색 + ⚡자주쓰는(고정) + ⭐즐겨찾기 + 카테고리(기본 펼침) ──
 const FAV_KEY = "approvalFavs";
-// 매일·반복적으로 자주 쓰는 양식 — 상단 고정 노출
-const COMMON_KEYS = ["report_daily", "expense", "vacation", "overtime", "purchase", "coop", "report_meeting", "report_weekly"];
+const FAV_SEED_KEY = "approvalFavsSeed";
+const FAV_SEED_VER = "v2";   // 기본 자주쓰는 양식 1회 주입 버전
+// 기본 '자주 쓰는 양식'(편집 가능 — 별★로 추가/제거). coop=업무협조전(업무 요청)
+const DEFAULT_FAVS = ["report_daily", "report_weekly", "report_monthly", "expense", "vacation", "overtime", "purchase", "coop", "report_meeting"];
+function initFavs() {
+  let cur = []; try { cur = JSON.parse(localStorage.getItem(FAV_KEY) || "[]"); } catch {}
+  if (localStorage.getItem(FAV_SEED_KEY) !== FAV_SEED_VER) {
+    cur = [...new Set([...DEFAULT_FAVS, ...cur])];
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(cur)); localStorage.setItem(FAV_SEED_KEY, FAV_SEED_VER); } catch {}
+  }
+  return cur;
+}
 function TemplateGallery({ sel, onPick }) {
-  const [favs, setFavs] = useState(() => { try { return JSON.parse(localStorage.getItem(FAV_KEY) || "[]"); } catch { return []; } });
+  const [favs, setFavs] = useState(initFavs);
   const [collapsed, setCollapsed] = useState({});   // 세션 한정(기억 안 함) — 항상 펼친 채 시작
   const [q, setQ] = useState("");
   const toggleFav = (key, e) => { e.stopPropagation(); setFavs((p) => { const n = p.includes(key) ? p.filter((k) => k !== key) : [...p, key]; localStorage.setItem(FAV_KEY, JSON.stringify(n)); return n; }); };
   const toggleGroup = (g) => setCollapsed((p) => ({ ...p, [g]: !p[g] }));
   const byKey = (k) => DOC_TYPES.find((t) => t.key === k);
-  const commonTypes = COMMON_KEYS.map(byKey).filter(Boolean);
-  const favTypes = favs.filter((k) => !COMMON_KEYS.includes(k)).map(byKey).filter(Boolean);
+  const favTypes = favs.map(byKey).filter(Boolean);
   const query = q.trim().toLowerCase();
   const results = query ? DOC_TYPES.filter((dt) => (dt.label + " " + (dt.guide || "") + " " + dt.group).toLowerCase().includes(query)) : null;
 
@@ -184,15 +193,10 @@ function TemplateGallery({ sel, onPick }) {
           </div>
         ) : (
           <>
-            {/* ⚡ 자주 쓰는 양식 (고정) */}
-            <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px dashed #fde68a" }}>
-              <div style={{ fontSize: 10, fontWeight: 800, color: "#f59e0b", letterSpacing: 0.6, padding: "5px 8px 3px" }}>⚡ 자주 쓰는 양식</div>
-              {commonTypes.map((dt) => <Row key={"common-" + dt.key} idKey={"common-" + dt.key} dt={dt} showGroup />)}
-            </div>
-            {/* ⭐ 내 즐겨찾기 */}
+            {/* ⭐ 자주 쓰는 양식 (편집 가능 — 별★로 추가/제거) */}
             {favTypes.length > 0 && (
-              <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px dashed #e2e8f0" }}>
-                <div style={{ fontSize: 10, fontWeight: 800, color: "#f59e0b", letterSpacing: 0.6, padding: "5px 8px 3px" }}>⭐ 내 즐겨찾기</div>
+              <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px dashed #fde68a" }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "#f59e0b", letterSpacing: 0.6, padding: "5px 8px 3px", display: "flex", alignItems: "center" }}>⭐ 자주 쓰는 양식 <span style={{ marginLeft: "auto", fontWeight: 500, color: "#cbd5e1", letterSpacing: 0 }}>★ 눌러 편집</span></div>
                 {favTypes.map((dt) => <Row key={"fav-" + dt.key} idKey={"fav-" + dt.key} dt={dt} showGroup />)}
               </div>
             )}
