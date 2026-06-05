@@ -2823,8 +2823,20 @@ function verifyPw(pw, stored) {
 }
 const pubUser = ({ passwordHash, ...h }) => ({ ...h, hasPassword: !!passwordHash });
 
+// 로그인 무차별 대입(brute-force) 방어 — IP당 10분 20회 초과 시 차단 (외부 노출 대비)
+const _loginHits = new Map();
+const _clientIp = (req) => req.headers["cf-connecting-ip"] || String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.ip || "?";
+function _loginLimited(req) {
+  const ip = _clientIp(req), now = Date.now();
+  const r = _loginHits.get(ip) || { c: 0, t: now };
+  if (now - r.t > 600000) { r.c = 0; r.t = now; }
+  r.c++; _loginHits.set(ip, r);
+  return r.c > 20;
+}
+
 // POST /api/login { email, password }
 app.post("/api/login", (req, res) => {
+  if (_loginLimited(req)) return res.status(429).json({ error: "로그인 시도가 너무 많습니다. 10분 후 다시 시도하세요" });
   const { email, password } = req.body || {};
   if (!email) return res.status(400).json({ error: "이메일을 입력하세요" });
   const u = loadHumans().find((h) => (h.email || "").toLowerCase() === String(email).toLowerCase().trim());
