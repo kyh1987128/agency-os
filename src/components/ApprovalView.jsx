@@ -138,53 +138,81 @@ export default function ApprovalView({ humans = [] }) {
   );
 }
 
-// ── M: 양식 갤러리 (작성) — ⭐즐겨찾기 + 카테고리 펼침/접힘 ──────────────────────────
+// ── M: 양식 갤러리 (작성) — 검색 + ⚡자주쓰는(고정) + ⭐즐겨찾기 + 카테고리(기본 펼침) ──
 const FAV_KEY = "approvalFavs";
-const COLLAPSE_KEY = "approvalCollapse";
+// 매일·반복적으로 자주 쓰는 양식 — 상단 고정 노출
+const COMMON_KEYS = ["report_daily", "expense", "vacation", "overtime", "purchase", "coop", "report_meeting", "report_weekly"];
 function TemplateGallery({ sel, onPick }) {
   const [favs, setFavs] = useState(() => { try { return JSON.parse(localStorage.getItem(FAV_KEY) || "[]"); } catch { return []; } });
-  const [collapsed, setCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "{}"); } catch { return {}; } });
+  const [collapsed, setCollapsed] = useState({});   // 세션 한정(기억 안 함) — 항상 펼친 채 시작
+  const [q, setQ] = useState("");
   const toggleFav = (key, e) => { e.stopPropagation(); setFavs((p) => { const n = p.includes(key) ? p.filter((k) => k !== key) : [...p, key]; localStorage.setItem(FAV_KEY, JSON.stringify(n)); return n; }); };
-  const toggleGroup = (g) => setCollapsed((p) => { const n = { ...p, [g]: !p[g] }; localStorage.setItem(COLLAPSE_KEY, JSON.stringify(n)); return n; });
-  const favTypes = favs.map((k) => DOC_TYPES.find((t) => t.key === k)).filter(Boolean);
+  const toggleGroup = (g) => setCollapsed((p) => ({ ...p, [g]: !p[g] }));
+  const byKey = (k) => DOC_TYPES.find((t) => t.key === k);
+  const commonTypes = COMMON_KEYS.map(byKey).filter(Boolean);
+  const favTypes = favs.filter((k) => !COMMON_KEYS.includes(k)).map(byKey).filter(Boolean);
+  const query = q.trim().toLowerCase();
+  const results = query ? DOC_TYPES.filter((dt) => (dt.label + " " + (dt.guide || "") + " " + dt.group).toLowerCase().includes(query)) : null;
 
-  const Row = ({ dt, idKey }) => {
+  const Row = ({ dt, idKey, showGroup }) => {
     const on = sel === dt.key; const fav = favs.includes(dt.key);
     return (
       <div key={idKey} onClick={() => onPick(dt.key)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 9px", borderRadius: 8, cursor: "pointer", marginBottom: 1, background: on ? dt.color + "16" : "transparent", border: "1px solid " + (on ? dt.color + "55" : "transparent") }}>
         <span style={{ fontSize: 15, flexShrink: 0 }}>{dt.icon}</span>
         <span style={{ fontSize: 12.5, fontWeight: on ? 800 : 600, color: on ? dt.color : "#334155", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dt.label}</span>
-        <span onClick={(e) => toggleFav(dt.key, e)} title={fav ? "즐겨찾기 해제" : "자주 쓰는 양식에 추가"} style={{ flexShrink: 0, fontSize: 13, color: fav ? "#f59e0b" : "#d1d5db", cursor: "pointer", padding: "0 2px" }}>{fav ? "★" : "☆"}</span>
+        {showGroup && <span style={{ flexShrink: 0, fontSize: 9, color: "#cbd5e1" }}>{dt.group}</span>}
+        <span onClick={(e) => toggleFav(dt.key, e)} title={fav ? "즐겨찾기 해제" : "내 즐겨찾기 추가"} style={{ flexShrink: 0, fontSize: 13, color: fav ? "#f59e0b" : "#d1d5db", cursor: "pointer", padding: "0 2px" }}>{fav ? "★" : "☆"}</span>
       </div>
     );
   };
 
   return (
     <>
-      <div style={{ padding: "11px 14px", borderBottom: "1px solid #e2e8f0", fontSize: 12, fontWeight: 800, color: "#1e293b" }}>📁 양식 선택 <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>· {DOC_TYPES.length}종</span></div>
+      <div style={{ padding: "10px 12px 8px", borderBottom: "1px solid #e2e8f0" }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#1e293b", marginBottom: 7 }}>📁 양식 선택 <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>· {DOC_TYPES.length}종</span></div>
+        <div style={{ position: "relative" }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 양식 검색 (예: 업무보고)" style={{ width: "100%", boxSizing: "border-box", border: "1px solid " + (q ? "#a5b4fc" : "#e2e8f0"), borderRadius: 8, padding: "7px 26px 7px 10px", fontSize: 12, outline: "none", color: "#1e293b", background: q ? "#fff" : "#f8fafc" }} />
+          {q && <span onClick={() => setQ("")} style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: "#94a3b8", fontSize: 12, fontWeight: 700 }}>✕</span>}
+        </div>
+      </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px 20px" }}>
-        {/* ⭐ 자주 쓰는 양식 */}
-        {favTypes.length > 0 && (
-          <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px dashed #fde68a" }}>
-            <div style={{ fontSize: 10, fontWeight: 800, color: "#f59e0b", letterSpacing: 0.6, padding: "5px 8px 3px" }}>⭐ 자주 쓰는 양식</div>
-            {favTypes.map((dt) => <Row key={"fav-" + dt.key} idKey={"fav-" + dt.key} dt={dt} />)}
+        {results ? (
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "#6366f1", letterSpacing: 0.6, padding: "3px 8px 5px" }}>검색 결과 · {results.length}</div>
+            {results.length === 0 && <div style={{ fontSize: 11.5, color: "#cbd5e1", padding: "20px 10px", textAlign: "center" }}>일치하는 양식이 없습니다.</div>}
+            {results.map((dt) => <Row key={"q-" + dt.key} idKey={"q-" + dt.key} dt={dt} showGroup />)}
           </div>
-        )}
-        {/* 카테고리 (펼침/접힘) */}
-        {DOC_GROUPS.map((g) => {
-          const list = DOC_TYPES.filter((dt) => dt.group === g); if (!list.length) return null;
-          const open = !collapsed[g];
-          return (
-            <div key={g} style={{ marginBottom: 4 }}>
-              <div onClick={() => toggleGroup(g)} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 800, color: "#64748b", letterSpacing: 0.6, padding: "6px 8px", cursor: "pointer", borderRadius: 6, userSelect: "none" }}
-                onMouseEnter={(e) => e.currentTarget.style.background = "#f1f5f9"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-                <span style={{ fontSize: 9, color: "#94a3b8", width: 9, display: "inline-block" }}>{open ? "▾" : "▸"}</span>
-                {g}<span style={{ marginLeft: "auto", color: "#cbd5e1", fontWeight: 600 }}>{list.length}</span>
-              </div>
-              {open && list.map((dt) => <Row key={dt.key} idKey={dt.key} dt={dt} />)}
+        ) : (
+          <>
+            {/* ⚡ 자주 쓰는 양식 (고정) */}
+            <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px dashed #fde68a" }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#f59e0b", letterSpacing: 0.6, padding: "5px 8px 3px" }}>⚡ 자주 쓰는 양식</div>
+              {commonTypes.map((dt) => <Row key={"common-" + dt.key} idKey={"common-" + dt.key} dt={dt} showGroup />)}
             </div>
-          );
-        })}
+            {/* ⭐ 내 즐겨찾기 */}
+            {favTypes.length > 0 && (
+              <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px dashed #e2e8f0" }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "#f59e0b", letterSpacing: 0.6, padding: "5px 8px 3px" }}>⭐ 내 즐겨찾기</div>
+                {favTypes.map((dt) => <Row key={"fav-" + dt.key} idKey={"fav-" + dt.key} dt={dt} showGroup />)}
+              </div>
+            )}
+            {/* 카테고리 (기본 펼침, 접기는 세션 한정) */}
+            {DOC_GROUPS.map((g) => {
+              const list = DOC_TYPES.filter((dt) => dt.group === g); if (!list.length) return null;
+              const open = !collapsed[g];
+              return (
+                <div key={g} style={{ marginBottom: 4 }}>
+                  <div onClick={() => toggleGroup(g)} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 800, color: "#64748b", letterSpacing: 0.6, padding: "6px 8px", cursor: "pointer", borderRadius: 6, userSelect: "none" }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = "#f1f5f9"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                    <span style={{ fontSize: 9, color: "#94a3b8", width: 9, display: "inline-block" }}>{open ? "▾" : "▸"}</span>
+                    {g}<span style={{ marginLeft: "auto", color: "#cbd5e1", fontWeight: 600 }}>{list.length}</span>
+                  </div>
+                  {open && list.map((dt) => <Row key={dt.key} idKey={dt.key} dt={dt} />)}
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
     </>
   );
