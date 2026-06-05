@@ -11,7 +11,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import multer from "multer";
-import { randomUUID } from "crypto";
+import { randomUUID, scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import MiniSearch from "minisearch";
 
 // .env 로드 (Dify API 키 등) — Node 20.12+ 내장. 없으면 무시.
@@ -2745,9 +2745,9 @@ app.delete("/api/departments/:id", (req, res) => {
 // Humans API
 // ════════════════════════════════════════════════════════════════════════════════
 
-// GET /api/humans
+// GET /api/humans (비밀번호 해시는 절대 노출하지 않음 — hasPassword 플래그만)
 app.get("/api/humans", (req, res) => {
-  res.json(loadHumans());
+  res.json(loadHumans().map(({ passwordHash, ...h }) => ({ ...h, hasPassword: !!passwordHash })));
 });
 
 // POST /api/humans
@@ -2766,14 +2766,16 @@ app.post("/api/humans", (req, res) => {
   res.status(201).json(human);
 });
 
-// PATCH /api/humans/:id
+// PATCH /api/humans/:id (passwordHash는 이 경로로 못 바꾸게 — 별도 비번 API 사용)
 app.patch("/api/humans/:id", (req, res) => {
   const humans = loadHumans();
   const idx = humans.findIndex(h => h.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: "not found" });
-  humans[idx] = { ...humans[idx], ...req.body };
+  const { passwordHash, ...body } = req.body || {};
+  humans[idx] = { ...humans[idx], ...body };
   saveHumans(humans);
-  res.json(humans[idx]);
+  const { passwordHash: _ph, ...out } = humans[idx];
+  res.json({ ...out, hasPassword: !!humans[idx].passwordHash });
 });
 
 // DELETE /api/humans/:id
@@ -2781,6 +2783,47 @@ app.delete("/api/humans/:id", (req, res) => {
   const humans = loadHumans();
   saveHumans(humans.filter(h => h.id !== req.params.id));
   res.json({ ok: true });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════
+// 내부 로그인 (이메일 + 개별 비밀번호) — scrypt 해시, 평문 저장 안 함
+// ════════════════════════════════════════════════════════════════════════════════
+function hashPw(pw) {
+  const salt = randomBytes(16).toString("hex");
+  return `${salt}:${scryptSync(String(pw), salt, 64).toString("hex")}`;
+}
+function verifyPw(pw, stored) {
+  if (!stored || !stored.includes(":")) return false;
+  const [salt, hash] = stored.split(":");
+  const a = Buffer.from(hash, "hex");
+  const b = scryptSync(String(pw), salt, 64);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+const pubUser = ({ passwordHash, ...h }) => ({ ...h, hasPassword: !!passwordHash });
+
+// POST /api/login { email, password }
+app.post("/api/login", (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email) return res.status(400).json({ error: "이메일을 입력하세요" });
+  const u = loadHumans().find((h) => (h.email || "").toLowerCase() === String(email).toLowerCase().trim());
+  if (!u) return res.status(401).json({ error: "등록되지 않은 이메일입니다" });
+  if (u.status === "blocked") return res.status(403).json({ error: "차단된 계정입니다. 관리자에게 문의하세요" });
+  if (!u.passwordHash) return res.json({ needSetup: true, userId: u.id, name: u.name }); // 첫 로그인 — 비번 설정
+  if (!password || !verifyPw(password, u.passwordHash)) return res.status(401).json({ error: "비밀번호가 일치하지 않습니다" });
+  res.json({ ok: true, user: pubUser(u) });
+});
+
+// POST /api/users/:id/password { current, next } — 본인 비밀번호 설정/변경
+app.post("/api/users/:id/password", (req, res) => {
+  const { current, next } = req.body || {};
+  if (!next || String(next).length < 4) return res.status(400).json({ error: "비밀번호는 4자 이상이어야 합니다" });
+  const humans = loadHumans();
+  const idx = humans.findIndex((h) => h.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "사용자를 찾을 수 없습니다" });
+  if (humans[idx].passwordHash && !verifyPw(current, humans[idx].passwordHash)) return res.status(401).json({ error: "현재 비밀번호가 일치하지 않습니다" });
+  humans[idx].passwordHash = hashPw(next);
+  saveHumans(humans);
+  res.json({ ok: true, user: pubUser(humans[idx]) });
 });
 
 // ════════════════════════════════════════════════════════════════════════════════
