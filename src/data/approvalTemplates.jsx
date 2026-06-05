@@ -7,7 +7,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 export const COMPANY = "콘텐츠잇다";
-export const DOC_GROUPS = ["근태", "재무", "인사", "계약", "업무"];
+export const DOC_GROUPS = ["근태", "재무", "인사", "계약", "보고", "업무", "자산"];
 
 // 빈칸 표시
 const d = (v, ph = "________") => (v == null || v === "" ? ph : v);
@@ -231,6 +231,91 @@ export const DOC_TYPES = [
     guide: "정해진 양식이 없는 일반 안건을 자유롭게 기안합니다.", line: "팀장(자유 지정)",
     fields: [{ k: "subject", label: "제목", type: "text" }, { k: "content", label: "기안 내용", type: "area" }],
     body: (v) => `${v.subject ? `**${v.subject}**\n\n` : ""}${d(v.content)}`,
+    signers: null,
+  },
+
+  // ─────────────────────────── 보고 ───────────────────────────
+  {
+    key: "report_daily", label: "일일 업무보고", icon: "🗒", color: "#0891b2", group: "보고", docKind: "form",
+    guide: "오늘 한 일과 내일 할 일을 보고합니다. 매일 퇴근 전, 본인 → 팀.", line: "팀장",
+    fields: [{ k: "date", label: "일자", type: "date" }, { k: "done", label: "오늘 한 일", type: "area" }, { k: "issue", label: "진행률·이슈", type: "area" }, { k: "tomorrow", label: "내일 계획", type: "area" }],
+    body: (v) => `**${d(v.date)} 일일 업무보고**\n\n**오늘 한 일**\n\n${d(v.done)}\n\n**진행률 · 이슈**\n\n${d(v.issue, "—")}\n\n**내일 계획**\n\n${d(v.tomorrow)}`,
+    signers: null,
+  },
+  {
+    key: "report_weekly", label: "주간 업무보고", icon: "📅", color: "#0891b2", group: "보고", docKind: "form",
+    guide: "한 주의 성과·리스크를 정리하고 다음 주 우선순위를 공유합니다.", line: "팀장 → (대표)",
+    fields: [{ k: "week", label: "주차·기간", type: "text" }, { k: "achieve", label: "주요 성과", type: "area" }, { k: "delay", label: "지연·이슈", type: "area" }, { k: "next", label: "다음 주 계획", type: "area" }, { k: "help", label: "도움 필요 사항", type: "text" }],
+    body: (v) => `**주간 업무보고** (${d(v.week)})\n\n**주요 성과**\n\n${d(v.achieve)}\n\n**지연 · 이슈**\n\n${d(v.delay, "—")}\n\n**다음 주 계획**\n\n${d(v.next)}\n\n**도움 필요 사항** : ${d(v.help, "—")}`,
+    signers: null,
+  },
+  {
+    key: "report_monthly", label: "월간 업무보고", icon: "📆", color: "#0891b2", group: "보고", docKind: "form",
+    guide: "월 단위 목표 대비 성과를 점검하고 다음 달 계획을 보고합니다.", line: "팀장 → 대표",
+    fields: [{ k: "month", label: "해당 월", type: "text" }, { k: "goal", label: "목표 달성도", type: "area" }, { k: "achieve", label: "주요 성과", type: "area" }, { k: "metric", label: "주요 수치(매출·산출물 등)", type: "text" }, { k: "next", label: "다음 달 목표", type: "area" }],
+    body: (v) => `**월간 업무보고** (${d(v.month)})\n\n**목표 달성도**\n\n${d(v.goal)}\n\n**주요 성과**\n\n${d(v.achieve)}\n\n**주요 수치** : ${d(v.metric, "—")}\n\n**다음 달 목표**\n\n${d(v.next)}`,
+    signers: null,
+  },
+  {
+    key: "report_meeting", label: "회의록", icon: "🗣", color: "#0891b2", group: "보고", docKind: "form",
+    guide: "회의 안건·결정사항·할 일을 기록해 공유합니다.", line: "참석자 보고",
+    fields: [{ k: "title", label: "회의명", type: "text" }, { k: "datetime", label: "일시·장소", type: "text" }, { k: "attendees", label: "참석자", type: "text" }, { k: "agenda", label: "안건", type: "area" }, { k: "decisions", label: "결정 사항", type: "area" }, { k: "todos", label: "할 일 · 담당 · 기한", type: "area" }],
+    body: (v) => `**회의록 — ${d(v.title)}**\n\n- **일시·장소** : ${d(v.datetime)}\n- **참석자** : ${d(v.attendees)}\n\n**안건**\n\n${d(v.agenda)}\n\n**결정 사항**\n\n${d(v.decisions)}\n\n**할 일 (담당·기한)**\n\n${d(v.todos)}`,
+    signers: null,
+  },
+  {
+    key: "report_project", label: "프로젝트 결과보고서", icon: "🏁", color: "#0891b2", group: "보고", docKind: "form",
+    guide: "완료된 프로젝트의 결과·성과·개선점을 보고합니다.", line: "팀장 → 대표",
+    fields: [{ k: "project", label: "프로젝트명", type: "text" }, { k: "client", label: "클라이언트", type: "text" }, { k: "period", label: "수행 기간", type: "text" }, { k: "result", label: "결과 · 성과", type: "area" }, { k: "metric", label: "주요 수치(매출·조회수 등)", type: "text" }, { k: "issue", label: "이슈 · 개선점", type: "area" }, { k: "next", label: "후속 계획", type: "area" }],
+    body: (v) => `**프로젝트 결과보고서**\n\n- **프로젝트** : ${d(v.project)}\n- **클라이언트** : ${d(v.client, "—")}\n- **수행 기간** : ${d(v.period)}\n\n**결과 · 성과**\n\n${d(v.result)}\n\n**주요 수치** : ${d(v.metric, "—")}\n\n**이슈 · 개선점**\n\n${d(v.issue, "—")}\n\n**후속 계획**\n\n${d(v.next, "—")}`,
+    signers: null,
+  },
+  {
+    key: "report_field", label: "외근·현장 보고", icon: "📍", color: "#0891b2", group: "보고", docKind: "form",
+    guide: "외근·현장 방문 결과를 보고합니다.", line: "팀장",
+    fields: [{ k: "place", label: "방문지", type: "text" }, { k: "date", label: "일자", type: "date" }, { k: "purpose", label: "목적", type: "text" }, { k: "content", label: "내용 · 결과", type: "area" }, { k: "next", label: "후속 조치", type: "area" }],
+    body: (v) => `**외근 · 현장 보고**\n\n- **방문지** : ${d(v.place)}\n- **일자** : ${d(v.date)}\n- **목적** : ${d(v.purpose)}\n\n**내용 · 결과**\n\n${d(v.content)}\n\n**후속 조치**\n\n${d(v.next, "—")}`,
+    signers: null,
+  },
+
+  // ─────────────────────────── 업무(계획·조사) ───────────────────────────
+  {
+    key: "plan_work", label: "업무 계획서", icon: "🗓", color: "#6366f1", group: "업무", docKind: "form",
+    guide: "주간·월간 단위 업무 목표와 일정을 미리 계획·공유합니다.", line: "팀장",
+    fields: [{ k: "kind", label: "구분", type: "select", opts: ["주간 계획", "월간 계획", "분기 계획"] }, { k: "period", label: "대상 기간", type: "text" }, { k: "goals", label: "목표", type: "area" }, { k: "tasks", label: "주요 업무", type: "area" }, { k: "schedule", label: "일정", type: "area" }],
+    body: (v) => `**${d(v.kind, "업무 계획")}** (${d(v.period)})\n\n**목표**\n\n${d(v.goals)}\n\n**주요 업무**\n\n${d(v.tasks)}\n\n**일정**\n\n${d(v.schedule, "—")}`,
+    signers: null,
+  },
+  {
+    key: "research", label: "시장조사·리서치 보고", icon: "🔎", color: "#6366f1", group: "업무", docKind: "form",
+    guide: "시장·경쟁사·트렌드 조사 결과와 시사점을 보고합니다.", line: "팀장",
+    fields: [{ k: "subject", label: "조사 주제", type: "text" }, { k: "method", label: "조사 방법·범위", type: "text" }, { k: "finding", label: "주요 발견", type: "area" }, { k: "insight", label: "시사점 · 제안", type: "area" }],
+    body: (v) => `**시장조사 · 리서치 보고**\n\n- **주제** : ${d(v.subject)}\n- **방법·범위** : ${d(v.method, "—")}\n\n**주요 발견**\n\n${d(v.finding)}\n\n**시사점 · 제안**\n\n${d(v.insight)}`,
+    signers: null,
+  },
+
+  // ─────────────────────────── 자산 ───────────────────────────
+  {
+    key: "asset_out", label: "장비·물품 불출/반납", icon: "📦", color: "#0d9488", group: "자산", docKind: "form",
+    guide: "촬영 장비·노트북 등 회사 자산의 불출(대여) 또는 반납을 신청합니다.", line: "총무",
+    fields: [{ k: "kind", label: "구분", type: "select", opts: ["불출(대여)", "반납"] }, { k: "item", label: "품목", type: "text" }, { k: "qty", label: "수량", type: "text" }, { k: "period", label: "사용 기간", type: "text" }, { k: "purpose", label: "용도", type: "text" }, { k: "state", label: "상태(반납 시)", type: "text" }],
+    body: (v) => `아래와 같이 자산 **${d(v.kind, "불출/반납")}**을(를) 신청합니다.\n\n- **품목** : ${d(v.item)}\n- **수량** : ${d(v.qty)}\n- **사용 기간** : ${d(v.period, "—")}\n- **용도** : ${d(v.purpose, "—")}\n- **상태(반납 시)** : ${d(v.state, "—")}\n\n> 분실·파손 시 즉시 보고하며, 반납 시 상태를 확인받습니다.`,
+    signers: null,
+  },
+
+  // ─────────────────────────── 인사(추가) ───────────────────────────
+  {
+    key: "interview_eval", label: "면접 평가표", icon: "🧑‍⚖️", color: "#f59e0b", group: "인사", docKind: "form",
+    guide: "면접 지원자에 대한 역량 평가와 합격 의견을 기록합니다.", line: "면접관 → 대표",
+    fields: [{ k: "candidate", label: "지원자", type: "text" }, { k: "position", label: "지원 직무", type: "text" }, { k: "date", label: "면접일", type: "date" }, { k: "score", label: "역량 평가(직무·태도·소통 등)", type: "area" }, { k: "comment", label: "종합 의견", type: "area" }, { k: "result", label: "결과", type: "select", opts: ["합격", "보류", "불합격"] }],
+    body: (v) => `**면접 평가표**\n\n- **지원자** : ${d(v.candidate)}\n- **지원 직무** : ${d(v.position)}\n- **면접일** : ${d(v.date)}\n\n**역량 평가**\n\n${d(v.score)}\n\n**종합 의견**\n\n${d(v.comment)}\n\n**평가 결과** : **${d(v.result, "보류")}**`,
+    signers: null,
+  },
+  {
+    key: "edu_report", label: "교육 수료 보고", icon: "🎓", color: "#f59e0b", group: "인사", docKind: "form",
+    guide: "지원받은 교육·세미나 수료 결과와 업무 적용 계획을 보고합니다.", line: "팀장",
+    fields: [{ k: "course", label: "교육명", type: "text" }, { k: "org", label: "기관", type: "text" }, { k: "period", label: "기간", type: "text" }, { k: "content", label: "주요 학습 내용", type: "area" }, { k: "apply", label: "업무 적용 계획", type: "area" }],
+    body: (v) => `**교육 수료 보고**\n\n- **교육명** : ${d(v.course)}\n- **기관** : ${d(v.org, "—")}\n- **기간** : ${d(v.period, "—")}\n\n**주요 학습 내용**\n\n${d(v.content)}\n\n**업무 적용 계획**\n\n${d(v.apply)}`,
     signers: null,
   },
 ];

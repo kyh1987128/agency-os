@@ -30,14 +30,21 @@ const inp = { width: "100%", boxSizing: "border-box", border: "1px solid #e2e8f0
 const fmtD = (s) => s ? new Date(s).toLocaleDateString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" }) : "";
 
 export default function ApprovalView({ humans = [] }) {
-  const [docs, setDocs] = useState(loadDocs);
+  const [docs, setDocs] = useState([]);
   const [me, setMe] = useState(() => localStorage.getItem(LS_ME) || "");
   const [box, setBox] = useState("inbox");
   const [selId, setSelId] = useState(null);
-  const [view, setView] = useState("browse");        // browse | compose | help
+  const [view, setView] = useState("compose");       // browse | compose | help (기본: 작성 — 상시 3패널)
   const [composeType, setComposeType] = useState(DOC_TYPES[0].key);
 
-  useEffect(() => { saveDocs(docs); }, [docs]);
+  // 서버 영속화(다중 사용자 공유) + SSE 실시간 동기화
+  const load = () => fetch("/api/approvals").then((r) => r.json()).then((d) => setDocs(Array.isArray(d) ? d : [])).catch(() => {});
+  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const es = new EventSource("/api/stream");
+    es.onmessage = (e) => { try { const m = JSON.parse(e.data); if (m.type === "data_update" && m.resource === "approvals") load(); } catch {} };
+    return () => es.close();
+  }, []);
   useEffect(() => { if (!me && humans.length) setMe(humans[0].id); }, [humans]);
   useEffect(() => { if (me) localStorage.setItem(LS_ME, me); }, [me]);
   const meName = (humans.find((h) => h.id === me) || {}).name || "나";
@@ -59,7 +66,11 @@ export default function ApprovalView({ humans = [] }) {
   const boxDocs = { inbox: myInbox, sent: mySent, cc: myCc, done: myDone, draft: myDraft }[box] || [];
   const sel = docs.find((d) => d.id === selId) || null;
 
-  const upsert = (doc) => setDocs((p) => { const i = p.findIndex((d) => d.id === doc.id); return i < 0 ? [doc, ...p] : p.map((d) => (d.id === doc.id ? doc : d)); });
+  const upsert = (doc) => {
+    const exists = docs.some((d) => d.id === doc.id);
+    setDocs((p) => { const i = p.findIndex((d) => d.id === doc.id); return i < 0 ? [doc, ...p] : p.map((d) => (d.id === doc.id ? doc : d)); });
+    fetch(exists ? `/api/approvals/${doc.id}` : "/api/approvals", { method: exists ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(doc) }).catch(() => {});
+  };
   const act = (doc, decision, comment) => {
     const approvers = doc.approvers.map((a, i) => i === doc.curStep ? { ...a, status: decision, comment: comment || "", actedAt: new Date().toISOString() } : a);
     let status = doc.status, curStep = doc.curStep;
@@ -118,7 +129,7 @@ export default function ApprovalView({ humans = [] }) {
             onSubmit={(doc) => { upsert(doc); setView("browse"); setBox(doc.status === "draft" ? "draft" : "sent"); setSelId(doc.id); }} />
         ) : sel ? (
           <DetailPane doc={sel} me={me} humans={humans} onBack={() => setSelId(null)} onAct={act} onRecall={recall}
-            onDelete={(id) => { setDocs((p) => p.filter((d) => d.id !== id)); setSelId(null); }} />
+            onDelete={(id) => { setDocs((p) => p.filter((d) => d.id !== id)); fetch(`/api/approvals/${id}`, { method: "DELETE" }).catch(() => {}); setSelId(null); }} />
         ) : (
           <EmptyR onCompose={startCompose} />
         )}
@@ -127,26 +138,53 @@ export default function ApprovalView({ humans = [] }) {
   );
 }
 
-// ── M: 양식 갤러리 (작성) ────────────────────────────────────────────────────────
+// ── M: 양식 갤러리 (작성) — ⭐즐겨찾기 + 카테고리 펼침/접힘 ──────────────────────────
+const FAV_KEY = "approvalFavs";
+const COLLAPSE_KEY = "approvalCollapse";
 function TemplateGallery({ sel, onPick }) {
+  const [favs, setFavs] = useState(() => { try { return JSON.parse(localStorage.getItem(FAV_KEY) || "[]"); } catch { return []; } });
+  const [collapsed, setCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "{}"); } catch { return {}; } });
+  const toggleFav = (key, e) => { e.stopPropagation(); setFavs((p) => { const n = p.includes(key) ? p.filter((k) => k !== key) : [...p, key]; localStorage.setItem(FAV_KEY, JSON.stringify(n)); return n; }); };
+  const toggleGroup = (g) => setCollapsed((p) => { const n = { ...p, [g]: !p[g] }; localStorage.setItem(COLLAPSE_KEY, JSON.stringify(n)); return n; });
+  const favTypes = favs.map((k) => DOC_TYPES.find((t) => t.key === k)).filter(Boolean);
+
+  const Row = ({ dt, idKey }) => {
+    const on = sel === dt.key; const fav = favs.includes(dt.key);
+    return (
+      <div key={idKey} onClick={() => onPick(dt.key)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 9px", borderRadius: 8, cursor: "pointer", marginBottom: 1, background: on ? dt.color + "16" : "transparent", border: "1px solid " + (on ? dt.color + "55" : "transparent") }}>
+        <span style={{ fontSize: 15, flexShrink: 0 }}>{dt.icon}</span>
+        <span style={{ fontSize: 12.5, fontWeight: on ? 800 : 600, color: on ? dt.color : "#334155", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dt.label}</span>
+        <span onClick={(e) => toggleFav(dt.key, e)} title={fav ? "즐겨찾기 해제" : "자주 쓰는 양식에 추가"} style={{ flexShrink: 0, fontSize: 13, color: fav ? "#f59e0b" : "#d1d5db", cursor: "pointer", padding: "0 2px" }}>{fav ? "★" : "☆"}</span>
+      </div>
+    );
+  };
+
   return (
     <>
       <div style={{ padding: "11px 14px", borderBottom: "1px solid #e2e8f0", fontSize: 12, fontWeight: 800, color: "#1e293b" }}>📁 양식 선택 <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>· {DOC_TYPES.length}종</span></div>
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px 20px" }}>
-        {DOC_GROUPS.map((g) => (
-          <div key={g} style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 10, fontWeight: 800, color: "#94a3b8", letterSpacing: 0.6, padding: "5px 8px 3px" }}>{g}</div>
-            {DOC_TYPES.filter((dt) => dt.group === g).map((dt) => {
-              const on = sel === dt.key;
-              return (
-                <div key={dt.key} onClick={() => onPick(dt.key)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 9px", borderRadius: 8, cursor: "pointer", marginBottom: 1, background: on ? dt.color + "16" : "transparent", border: "1px solid " + (on ? dt.color + "55" : "transparent") }}>
-                  <span style={{ fontSize: 15, flexShrink: 0 }}>{dt.icon}</span>
-                  <span style={{ fontSize: 12.5, fontWeight: on ? 800 : 600, color: on ? dt.color : "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dt.label}</span>
-                </div>
-              );
-            })}
+        {/* ⭐ 자주 쓰는 양식 */}
+        {favTypes.length > 0 && (
+          <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px dashed #fde68a" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "#f59e0b", letterSpacing: 0.6, padding: "5px 8px 3px" }}>⭐ 자주 쓰는 양식</div>
+            {favTypes.map((dt) => <Row key={"fav-" + dt.key} idKey={"fav-" + dt.key} dt={dt} />)}
           </div>
-        ))}
+        )}
+        {/* 카테고리 (펼침/접힘) */}
+        {DOC_GROUPS.map((g) => {
+          const list = DOC_TYPES.filter((dt) => dt.group === g); if (!list.length) return null;
+          const open = !collapsed[g];
+          return (
+            <div key={g} style={{ marginBottom: 4 }}>
+              <div onClick={() => toggleGroup(g)} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 800, color: "#64748b", letterSpacing: 0.6, padding: "6px 8px", cursor: "pointer", borderRadius: 6, userSelect: "none" }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "#f1f5f9"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                <span style={{ fontSize: 9, color: "#94a3b8", width: 9, display: "inline-block" }}>{open ? "▾" : "▸"}</span>
+                {g}<span style={{ marginLeft: "auto", color: "#cbd5e1", fontWeight: 600 }}>{list.length}</span>
+              </div>
+              {open && list.map((dt) => <Row key={dt.key} idKey={dt.key} dt={dt} />)}
+            </div>
+          );
+        })}
       </div>
     </>
   );
