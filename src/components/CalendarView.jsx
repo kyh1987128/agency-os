@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useLayoutEffect } from "react";
+import { useState, useMemo, useCallback, useRef, useLayoutEffect, useEffect } from "react";
 import { Calendar, dateFnsLocalizer } from "react-big-calendar";
 import { format, parse, startOfWeek, getDay } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -77,6 +77,21 @@ function nodesToEvents(nodes, projData, departments, humans) {
       end.setDate(end.getDate() + 1);
       return { id: node.id, title: node.title, start, end, allDay: true, resource };
     });
+}
+
+/* 전자결재(승인된 휴가·출장 등)를 캘린더 이벤트로 — 자동 반영 */
+const LEAVE_TYPES = { vacation:{icon:"🏖",label:"휴가",color:"#0ea5e9"}, trip:{icon:"✈️",label:"출장",color:"#8b5cf6"}, remote:{icon:"🏠",label:"재택",color:"#14b8a6"}, leave_long:{icon:"🗓",label:"휴직",color:"#64748b"}, leave_early:{icon:"🚪",label:"조퇴·외출",color:"#f59e0b"} };
+function bizDays(from, to) { const a=new Date(from+"T00:00:00"), b=new Date((to||from)+"T00:00:00"); if(isNaN(a)||isNaN(b)||b<a) return 1; let n=0; const c=new Date(a); while(c<=b && n<366){ const w=c.getDay(); if(w!==0&&w!==6)n++; c.setDate(c.getDate()+1);} return n||1; }
+function vacationDays(d){ const k=d.fields?.kind||""; if(k.includes("반차")) return 0.5; if(["병가","경조","공가","무급휴가"].includes(k)) return 0; const from=d.fields?.from, to=d.fields?.to||from; if(!from) return 0; return bizDays(from,to); }
+function approvalsToEvents(approvals, humans){
+  return (approvals||[]).filter(d=>d.status==="approved" && LEAVE_TYPES[d.type] && (d.fields?.from||d.fields?.date)).map(d=>{
+    const lt=LEAVE_TYPES[d.type]; const fromStr=d.fields.from||d.fields.date; const toStr=d.fields.to||fromStr;
+    const start=new Date(fromStr+"T00:00:00"); if(isNaN(start)) return null;
+    const end=new Date((toStr||fromStr)+"T00:00:00"); end.setDate(end.getDate()+1);
+    const h=humans.find(x=>x.id===d.drafterId); const who=d.drafterName||h?.name||"";
+    const kind=d.fields.kind?` ${d.fields.kind}`:"";
+    return { id:"ap_"+d.id, title:`${lt.icon} ${who} ${lt.label}${kind}`, start, end, allDay:true, resource:{ isApproval:true, color:lt.color, proj:null, assigneeHumans:h?[h]:[], departments:[], approval:d } };
+  }).filter(Boolean);
 }
 
 /* 이벤트 카드 */
@@ -573,6 +588,23 @@ export default function CalendarView({ allNodes=[], projData=[], departments=[],
   const [newSlot,        setNewSlot]        = useState(null);
   const [showNoDate,     setShowNoDate]     = useState(false);
   const calWrapRef = useRef(null);
+  const [approvals,  setApprovals]  = useState([]);
+  const [showLeave,  setShowLeave]  = useState(false);
+  useEffect(() => {
+    const load = () => fetch("/api/approvals").then((r) => r.json()).then((d) => setApprovals(Array.isArray(d) ? d : [])).catch(() => {});
+    load();
+    const es = new EventSource("/api/stream");
+    es.onmessage = (e) => { try { const m = JSON.parse(e.data); if (m.type === "data_update" && m.resource === "approvals") load(); } catch {} };
+    return () => es.close();
+  }, []);
+  const approvalEvents = useMemo(() => approvalsToEvents(approvals, humans), [approvals, humans]);
+  const leaveStatus = useMemo(() => {
+    const ALLOT = 15;
+    return humans.map((h) => {
+      const used = approvals.filter((d) => d.type === "vacation" && d.status === "approved" && d.drafterId === h.id).reduce((s, d) => s + vacationDays(d), 0);
+      return { id: h.id, name: h.name, avatar: h.avatar, used, remain: Math.max(0, ALLOT - used), allot: ALLOT };
+    });
+  }, [approvals, humans]);
 
   /* 그룹 필터(프로젝트/부서/담당자) 통과 여부 — dueDate 조건과 분리 */
   const passesGroup = useCallback((n) => {
@@ -605,7 +637,7 @@ export default function CalendarView({ allNodes=[], projData=[], departments=[],
     return "";
   }, [groupMode, selectedId]);
 
-  const events = useMemo(() => nodesToEvents(filteredNodes, projData, departments, humans), [filteredNodes, projData, departments, humans]);
+  const events = useMemo(() => [...nodesToEvents(filteredNodes, projData, departments, humans), ...approvalEvents], [filteredNodes, projData, departments, humans, approvalEvents]);
 
   /* ── allDay 행 높이 강제 패치 ──
    * react-big-calendar가 .rbc-allday-cell에 height: Xpx를 inline style로 박음
@@ -677,7 +709,7 @@ export default function CalendarView({ allNodes=[], projData=[], departments=[],
     return () => { obs.disconnect(); if (timer) clearTimeout(timer); };
   }, [events, view, currentDate]);
 
-  const handleSelectEvent = useCallback((event) => setSelectedEvent(event), []);
+  const handleSelectEvent = useCallback((event) => { if (event.resource?.isApproval) return; setSelectedEvent(event); }, []);
 
   /* 마감일 미정 노드 클릭 → 동일한 편집 모달을 today 기본값으로 열어 날짜 지정 유도 */
   const openNoDateNode = useCallback((node) => {
@@ -819,6 +851,32 @@ export default function CalendarView({ allNodes=[], projData=[], departments=[],
                       </button>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 연차 현황 (승인된 휴가 자동 집계) */}
+          {leaveStatus.length > 0 && (
+            <div style={{ flexShrink:0, borderBottom:"1px solid #e9d5ff", background:"#faf5ff" }}>
+              <div onClick={() => setShowLeave(v => !v)} style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 16px", cursor:"pointer", userSelect:"none" }}>
+                <span style={{ fontSize:12 }}>📊</span>
+                <span style={{ fontSize:11, fontWeight:700, color:"#7c3aed" }}>연차 현황</span>
+                <span style={{ fontSize:10, color:"#a855f7" }}>· 승인된 휴가 자동 집계 (연 15일 기준)</span>
+                <span style={{ marginLeft:"auto", fontSize:10, color:"#a855f7" }}>{showLeave ? "▲ 접기" : "▼ 펼치기"}</span>
+              </div>
+              {showLeave && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:8, padding:"0 16px 10px" }}>
+                  {leaveStatus.map(s => (
+                    <div key={s.id} style={{ display:"flex", alignItems:"center", gap:7, padding:"5px 10px", borderRadius:8, border:"1px solid #e9d5ff", background:"#fff", minWidth:148 }}>
+                      <span style={{ fontSize:13 }}>{s.avatar || "👤"}</span>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontSize:11, fontWeight:700, color:"#1e293b", whiteSpace:"nowrap" }}>{s.name}</div>
+                        <div style={{ fontSize:9.5, color:"#7c3aed" }}>사용 {s.used} · 잔여 <b>{s.remain}</b>/{s.allot}일</div>
+                      </div>
+                      <div style={{ marginLeft:"auto", width:34, height:5, background:"#f3e8ff", borderRadius:3, overflow:"hidden", flexShrink:0 }}><div style={{ height:"100%", width:Math.min(100,(s.used/s.allot)*100)+"%", background:"linear-gradient(90deg,#a855f7,#7c3aed)" }} /></div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

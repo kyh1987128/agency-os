@@ -3,6 +3,7 @@ import { HUMANS } from "../data/humans";
 import { AI_AGENTS } from "../data/agents";
 import { DEPTS, PROJS, COLORS, getDept, STATUS } from "../data/mockData";
 import PixelAvatar from "./PixelAvatar";
+import BoardWidget from "./BoardWidget";
 
 const { bg: B, surface: S, border: BR, text: T, muted: M } = COLORS;
 
@@ -20,7 +21,7 @@ const BOTS = [
   { id: "ppt",      name: "발표자료 PPT 봇", icon: "📊", color: "#fb923c" },
 ];
 
-export default function RightPanel({ onSelect, activeProject = "default" }) {
+export default function RightPanel({ onSelect, activeProject = "default", onGoBoard }) {
   const [view,       setView]       = useState("list");
   const [selItem,    setSelItem]    = useState(null);
   const [deptFilter, setDeptFilter] = useState("all");
@@ -62,6 +63,8 @@ export default function RightPanel({ onSelect, activeProject = "default" }) {
       {/* LIST VIEW */}
       {view === "list" && (
         <div style={{ flex: 1, overflowY: "auto" }}>
+          {/* 최근 공지 + 나에게 온 알림 (게시판 위젯) */}
+          {onGoBoard && <BoardWidget onGo={onGoBoard} />}
           {/* 사람 */}
           <div style={{ padding: "7px 10px 4px", fontSize: 10, fontWeight: 700, color: M, background: B, borderBottom: "1px solid " + BR, position: "sticky", top: 0, zIndex: 2 }}>
             👤 사람 ({HUMANS.length})

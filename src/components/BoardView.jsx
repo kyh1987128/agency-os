@@ -39,7 +39,7 @@ const fmtDate = (d) => d ? new Date(d).toLocaleDateString("ko-KR", { month: "2-d
 const fmtFull = (d) => d ? new Date(d).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
 
 // ── 메인 ──────────────────────────────────────────────────────────────────
-export default function BoardView({ humans = [] }) {
+export default function BoardView({ humans = [], activeProject = "default" }) {
   const [boards, setBoards] = useState([]);
   const [me, setMe] = useState(() => { try { return JSON.parse(localStorage.getItem("boardMe")); } catch { return null; } });
   const [activeBoard, setActiveBoard] = useState(null);
@@ -48,12 +48,21 @@ export default function BoardView({ humans = [] }) {
   const [notis, setNotis] = useState([]);
   const [showNoti, setShowNoti] = useState(false);
   const [creatingBoard, setCreatingBoard] = useState(false);
+  const [gq, setGq] = useState("");           // 통합검색어
+  const [gres, setGres] = useState(null);     // 통합검색 결과
 
-  const loadBoards = () => fetch(`${API}/api/boards`).then((r) => r.json()).then((d) => { setBoards(d); if (!activeBoard && d.length) setActiveBoard(d[0].id); }).catch(() => {});
+  const loadBoards = () => fetch(`${API}/api/boards`).then((r) => r.json()).then((d) => setBoards(d)).catch(() => {});
+  const goHome = () => { setActiveBoard(null); setView("list"); setSelPostId(null); setCreatingBoard(false); setGq(""); setGres(null); };
   useEffect(() => { loadBoards(); }, []);
   useEffect(() => { if (!me && humans.length) { setMe(humans[0]); localStorage.setItem("boardMe", JSON.stringify(humans[0])); } }, [humans]);
   const loadNotis = () => { if (me) fetch(`${API}/api/notifications/${me.id}`).then((r) => r.json()).then((d) => setNotis(Array.isArray(d) ? d : [])).catch(() => {}); };
   useEffect(() => { loadNotis(); const t = setInterval(loadNotis, 15000); return () => clearInterval(t); }, [me]);
+  useEffect(() => {
+    const q = gq.trim();
+    if (q.length < 2) { setGres(null); return; }
+    const t = setTimeout(() => fetch(`${API}/api/search/all?q=${encodeURIComponent(q)}`).then((r) => r.json()).then(setGres).catch(() => {}), 350);
+    return () => clearTimeout(t);
+  }, [gq]);
 
   const board = boards.find((b) => b.id === activeBoard) || null;
   const unread = notis.filter((n) => !n.read).length;
@@ -66,7 +75,7 @@ export default function BoardView({ humans = [] }) {
       {/* 사이드바 */}
       <div style={{ width: 240, flexShrink: 0, background: "#fff", borderRight: "1px solid #e2e8f0", display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 800, color: "#1e293b" }}>📋 게시판</span>
+          <span onClick={goHome} style={{ fontSize: 14, fontWeight: 800, color: "#1e293b", cursor: "pointer" }}>📋 게시판 홈</span>
           <button onClick={() => { setShowNoti((v) => !v); }} style={{ marginLeft: "auto", position: "relative", border: "none", background: "transparent", cursor: "pointer", fontSize: 16 }}>
             🔔{unread > 0 && <span style={{ position: "absolute", top: -4, right: -6, background: "#ef4444", color: "#fff", fontSize: 9, borderRadius: 8, padding: "0 4px", fontWeight: 700 }}>{unread}</span>}
           </button>
@@ -78,15 +87,18 @@ export default function BoardView({ humans = [] }) {
             {humans.map((h) => <option key={h.id} value={h.id}>{h.avatar} {h.name}</option>)}
           </select>
         </div>
+        <div style={{ padding: "7px 12px", borderBottom: "1px solid #f1f5f9" }}>
+          <input value={gq} onChange={(e) => setGq(e.target.value)} placeholder="🔍 통합검색 (게시판·위키·드라이브)" style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 10px", fontSize: 11.5, outline: "none", color: "#1e293b" }} />
+        </div>
         <div style={{ padding: "8px 10px" }}>
           <button onClick={() => { setCreatingBoard(true); setView("list"); }} style={{ width: "100%", background: "#eef2ff", color: "#4338ca", border: "1px dashed #c7d2fe", borderRadius: 7, padding: "7px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ 게시판 만들기</button>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "0 6px 16px" }}>
+        <div className="board-scroll" style={{ flex: 1, overflowY: "auto", padding: "0 6px 16px", minHeight: 0 }}>
           {Object.entries(boards.filter((b) => !b.hidden).reduce((m, b) => { (m[b.group || "기타"] ||= []).push(b); return m; }, {})).map(([g, list]) => (
-            <div key={g} style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", padding: "5px 8px 2px", letterSpacing: 0.5 }}>{g}</div>
+            <div key={g} style={{ marginBottom: 4 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 800, color: "#64748b", padding: "6px 8px 2px", letterSpacing: 0.8, display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 3, height: 9, borderRadius: 2, background: "#c7d2fe", display: "inline-block" }} />{g}</div>
               {list.map((b) => (
-                <div key={b.id} onClick={() => goBoard(b.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 9px", borderRadius: 7, cursor: "pointer", background: activeBoard === b.id && view !== "write" && !creatingBoard ? "#eef2ff" : "transparent", color: activeBoard === b.id ? "#4338ca" : "#334155", fontSize: 12.5, fontWeight: activeBoard === b.id ? 700 : 500 }}>
+                <div key={b.id} onClick={() => goBoard(b.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 9px", borderRadius: 7, cursor: "pointer", background: activeBoard === b.id && view !== "write" && !creatingBoard ? "#eef2ff" : "transparent", color: activeBoard === b.id ? "#4338ca" : "#334155", fontSize: 12.5, fontWeight: activeBoard === b.id ? 700 : 500 }}>
                   <span>{b.icon}</span><span>{b.name}</span>
                   {b.type === "request" && <span style={{ marginLeft: "auto", fontSize: 8, background: "#dcfce7", color: "#16a34a", padding: "1px 5px", borderRadius: 6 }}>요청</span>}
                 </div>
@@ -98,14 +110,16 @@ export default function BoardView({ humans = [] }) {
 
       {/* 본문 */}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        {creatingBoard ? (
+        {gres && gq.trim().length >= 2 ? (
+          <SearchResults gres={gres} q={gq} onOpenPost={(boardId, postId) => { setActiveBoard(boardId); setGq(""); setGres(null); openPost(postId); }} onClear={() => { setGq(""); setGres(null); }} />
+        ) : creatingBoard ? (
           <NewBoardForm onCreate={async (data) => { await fetch(`${API}/api/boards`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }); setCreatingBoard(false); loadBoards(); }} onCancel={() => setCreatingBoard(false)} />
         ) : !board ? (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8" }}>게시판을 선택하세요</div>
+          <BoardHome onOpen={goBoard} onOpenPost={(boardId, postId) => { setActiveBoard(boardId); openPost(postId); }} />
         ) : view === "write" ? (
           <PostWrite board={board} me={me} humans={humans} onCancel={() => setView("list")} onDone={(p) => { setView("detail"); setSelPostId(p.id); }} />
         ) : view === "detail" && selPostId ? (
-          <PostDetail postId={selPostId} board={board} me={me} humans={humans} onBack={() => setView("list")} onDeleted={() => setView("list")} onEdit={() => setView("write")} />
+          <PostDetail postId={selPostId} board={board} me={me} humans={humans} activeProject={activeProject} onBack={() => setView("list")} onDeleted={() => setView("list")} onEdit={() => setView("write")} />
         ) : (
           <PostList board={board} me={me} onOpen={openPost} onWrite={() => setView("write")} />
         )}
@@ -122,46 +136,94 @@ function PostList({ board, me, onOpen, onWrite }) {
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("전체");   // 전체 | 개념 | 공지
+  const [flair, setFlair] = useState("");          // 말머리
+  const [size, setSize] = useState(50);
+  const [mode, setMode] = useState("list");
+  const [kb, setKb] = useState([]);
+  const isReq = board.type === "request";
 
-  const load = () => fetch(`${API}/api/boards/${board.id}/posts?page=${page}&q=${encodeURIComponent(query)}`).then((r) => r.json()).then(setData).catch(() => {});
-  useEffect(() => { load(); }, [board.id, page, query]);
-  useEffect(() => { setPage(1); }, [board.id]);
+  const load = () => fetch(`${API}/api/boards/${board.id}/posts?page=${page}&size=${size}&q=${encodeURIComponent(query)}&filter=${encodeURIComponent(filter)}&flair=${encodeURIComponent(flair)}`).then((r) => r.json()).then(setData).catch(() => {});
+  useEffect(() => { load(); }, [board.id, page, query, filter, flair, size]);
+  useEffect(() => { setPage(1); setFilter("전체"); setFlair(""); setMode("list"); setQ(""); setQuery(""); }, [board.id]);
+  useEffect(() => { if (isReq && mode === "kanban") fetch(`${API}/api/boards/${board.id}/posts?size=200`).then((r) => r.json()).then((d) => setKb([...d.pinned, ...d.posts])).catch(() => {}); }, [board.id, mode]);
 
-  const canWrite = board.writePerm !== "admin" || true; // 1차: 권한 UI만, 실제 제한은 추후
   const Row = ({ p, pinned }) => (
-    <div onClick={() => onOpen(p.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f1f5f9", cursor: "pointer", background: pinned ? "#fffbeb" : "#fff" }}
-      onMouseEnter={(e) => e.currentTarget.style.background = pinned ? "#fef3c7" : "#f8fafc"} onMouseLeave={(e) => e.currentTarget.style.background = pinned ? "#fffbeb" : "#fff"}>
-      <span style={{ width: 34, textAlign: "center", fontSize: 11, color: pinned ? "#d97706" : "#cbd5e1", fontWeight: pinned ? 700 : 400, flexShrink: 0 }}>{pinned ? "공지" : p.no}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: "#1e293b" }}>{pinned && <span style={{ marginRight: 4 }}>📌</span>}{p.title}</span>
-        {p.commentCount > 0 && <span style={{ marginLeft: 7, fontSize: 11.5, color: "#6366f1", fontWeight: 700 }}>💬{p.commentCount}</span>}
+    <div onClick={() => onOpen(p.id)} style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #f1f5f9", cursor: "pointer", background: pinned ? "#fffbeb" : "#fff", fontSize: 13 }}
+      onMouseEnter={(e) => e.currentTarget.style.background = pinned ? "#fef3c7" : "#f6f8fb"} onMouseLeave={(e) => e.currentTarget.style.background = pinned ? "#fffbeb" : "#fff"}>
+      <span style={{ width: 50, textAlign: "center", fontSize: 11.5, color: pinned ? "#d97706" : "#cbd5e1", fontWeight: pinned ? 700 : 400, flexShrink: 0, padding: "9px 0" }}>{pinned ? "공지" : p.no}</span>
+      <span style={{ width: 64, textAlign: "center", flexShrink: 0 }}>{p.flair && <span style={{ fontSize: 10.5, color: pinned ? "#d97706" : "#6366f1", background: pinned ? "#fef3c7" : "#eef2ff", padding: "1px 7px", borderRadius: 5 }}>{p.flair}</span>}</span>
+      <div style={{ flex: 1, minWidth: 0, padding: "9px 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span style={{ color: "#1e293b", fontWeight: pinned ? 700 : 500 }}>{p.title}</span>
+        {p.commentCount > 0 && <span style={{ marginLeft: 6, fontSize: 12, color: "#ef4444", fontWeight: 700 }}>[{p.commentCount}]</span>}
         {p.attachments?.length > 0 && <span style={{ marginLeft: 5, fontSize: 11 }}>📎</span>}
-        {board.type === "request" && p.status && <span style={{ marginLeft: 7, fontSize: 9.5, background: p.status === "완료" ? "#dcfce7" : p.status === "진행" ? "#dbeafe" : "#fef9c3", color: p.status === "완료" ? "#16a34a" : p.status === "진행" ? "#2563eb" : "#a16207", padding: "1px 7px", borderRadius: 8, fontWeight: 700 }}>{p.status}</span>}
+        {isReq && p.status && <span style={{ marginLeft: 7, fontSize: 9.5, background: p.status === "완료" ? "#dcfce7" : p.status === "진행" ? "#dbeafe" : "#fef9c3", color: p.status === "완료" ? "#16a34a" : p.status === "진행" ? "#2563eb" : "#a16207", padding: "1px 7px", borderRadius: 8, fontWeight: 700 }}>{p.status}</span>}
       </div>
-      <span style={{ fontSize: 11.5, color: "#64748b", flexShrink: 0, minWidth: 70, textAlign: "right" }}>{p.authorAvatar} {p.authorName}</span>
-      <span style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0, minWidth: 40, textAlign: "right" }}>{fmtDate(p.createdAt)}</span>
-      <span style={{ fontSize: 11, color: "#cbd5e1", flexShrink: 0, minWidth: 34, textAlign: "right" }}>👁{p.views || 0}</span>
-      <span style={{ fontSize: 11, color: "#cbd5e1", flexShrink: 0, minWidth: 30, textAlign: "right" }}>{p.likes?.length ? `♥${p.likes.length}` : ""}</span>
+      <span style={{ width: 92, fontSize: 12, color: "#475569", flexShrink: 0, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.authorAvatar} {p.authorName}</span>
+      <span style={{ width: 54, fontSize: 11.5, color: "#94a3b8", flexShrink: 0, textAlign: "center" }}>{fmtDate(p.createdAt)}</span>
+      <span style={{ width: 46, fontSize: 11.5, color: "#94a3b8", flexShrink: 0, textAlign: "center" }}>{p.views || 0}</span>
+      <span style={{ width: 46, fontSize: 11.5, color: (p.likes?.length >= 3) ? "#ef4444" : "#cbd5e1", fontWeight: (p.likes?.length >= 3) ? 700 : 400, flexShrink: 0, textAlign: "center" }}>{p.likes?.length || 0}</span>
     </div>
   );
+  const Tab = ({ id, label }) => <button onClick={() => { setFilter(id); setPage(1); }} style={{ border: "none", borderBottom: "2px solid " + (filter === id ? "#6366f1" : "transparent"), background: "transparent", color: filter === id ? "#4338ca" : "#94a3b8", padding: "9px 14px", fontSize: 13.5, fontWeight: 700, cursor: "pointer" }}>{label}</button>;
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#fff" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", borderBottom: "1px solid #e2e8f0" }}>
-        <span style={{ fontSize: 17 }}>{board.icon}</span>
-        <span style={{ fontSize: 16, fontWeight: 800, color: "#1e293b" }}>{board.name}</span>
-        <span style={{ fontSize: 11, color: "#94a3b8" }}>· 글 {data.total}</span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { setQuery(q); setPage(1); } }} placeholder="🔍 제목+내용 검색" style={{ border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 10px", fontSize: 12, outline: "none", width: 180, color: "#1e293b" }} />
-          <button onClick={onWrite} style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "6px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>✏ 글쓰기</button>
+      <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "2px 16px 0", borderBottom: "1px solid #e2e8f0" }}>
+        <span style={{ fontSize: 15, marginRight: 6 }}>{board.icon}</span>
+        <Tab id="전체" label="전체글" /><Tab id="개념" label="개념글" /><Tab id="공지" label="공지" />
+        <div style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center", paddingBottom: 4 }}>
+          {isReq && <div style={{ display: "flex", border: "1px solid #e2e8f0", borderRadius: 7, overflow: "hidden" }}>
+            {[["list", "목록"], ["kanban", "칸반"]].map(([m, l]) => <button key={m} onClick={() => setMode(m)} style={{ border: "none", background: mode === m ? "#6366f1" : "#fff", color: mode === m ? "#fff" : "#64748b", padding: "5px 10px", fontSize: 11.5, cursor: "pointer", fontWeight: 700 }}>{l}</button>)}
+          </div>}
+          <select value={size} onChange={(e) => { setSize(+e.target.value); setPage(1); }} style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px", fontSize: 11.5, color: "#475569" }}>{[30, 50, 100].map((s) => <option key={s} value={s}>{s}개</option>)}</select>
+          <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { setQuery(q); setPage(1); } }} placeholder="🔍 검색" style={{ border: "1px solid #e2e8f0", borderRadius: 7, padding: "5px 9px", fontSize: 12, outline: "none", width: 130, color: "#1e293b" }} />
+          <button onClick={onWrite} style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "6px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>✏ 글쓰기</button>
         </div>
       </div>
-      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-        {data.pinned.map((p) => <Row key={p.id} p={p} pinned />)}
-        {data.posts.map((p) => <Row key={p.id} p={p} />)}
-        {data.posts.length === 0 && data.pinned.length === 0 && <div style={{ textAlign: "center", color: "#cbd5e1", fontSize: 13, padding: "50px 0" }}>아직 글이 없습니다. 첫 글을 써보세요!</div>}
-      </div>
-      {data.pages > 1 && (
+      {(board.flairs || []).length > 0 && mode === "list" && filter === "전체" && (
+        <div style={{ display: "flex", gap: 5, padding: "7px 16px", borderBottom: "1px solid #f1f5f9", flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "#cbd5e1", marginRight: 2 }}>말머리</span>
+          {["", ...board.flairs].map((f) => <span key={f || "all"} onClick={() => { setFlair(f); setPage(1); }} style={{ fontSize: 11.5, padding: "3px 11px", borderRadius: 12, cursor: "pointer", background: flair === f ? "#6366f1" : "#f1f5f9", color: flair === f ? "#fff" : "#64748b", fontWeight: flair === f ? 700 : 500 }}>{f || "전체"}</span>)}
+        </div>
+      )}
+      {!(isReq && mode === "kanban") && (
+        <div style={{ display: "flex", alignItems: "center", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>
+          <span style={{ width: 50, textAlign: "center", padding: "7px 0" }}>번호</span>
+          <span style={{ width: 64, textAlign: "center" }}>말머리</span>
+          <span style={{ flex: 1, padding: "0 8px" }}>제목</span>
+          <span style={{ width: 92, textAlign: "center" }}>글쓴이</span>
+          <span style={{ width: 54, textAlign: "center" }}>작성일</span>
+          <span style={{ width: 46, textAlign: "center" }}>조회</span>
+          <span style={{ width: 46, textAlign: "center" }}>추천</span>
+        </div>
+      )}
+      {isReq && mode === "kanban" ? (
+        <div style={{ flex: 1, display: "flex", gap: 12, padding: 16, overflowX: "auto", minHeight: 0, background: "#f8fafc" }}>
+          {["요청", "진행", "완료"].map((st) => {
+            const items = kb.filter((p) => (p.status || "요청") === st);
+            return (
+              <div key={st} style={{ flex: "1 1 0", minWidth: 220, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <div style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontSize: 12.5, fontWeight: 700, color: st === "완료" ? "#16a34a" : st === "진행" ? "#2563eb" : "#a16207" }}>{st} <span style={{ color: "#cbd5e1" }}>{items.length}</span></div>
+                <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
+                  {items.map((p) => <div key={p.id} onClick={() => onOpen(p.id)} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 11px", marginBottom: 6, cursor: "pointer", background: "#fff" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>{p.title}</div>
+                    <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 4 }}>{p.authorAvatar} {p.authorName}{p.dueDate ? ` · ~${p.dueDate}` : ""}{p.commentCount ? ` · 💬${p.commentCount}` : ""}</div>
+                  </div>)}
+                  {items.length === 0 && <div style={{ fontSize: 10.5, color: "#cbd5e1", textAlign: "center", padding: "10px 0" }}>없음</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+          {data.pinned.map((p) => <Row key={p.id} p={p} pinned />)}
+          {data.posts.map((p) => <Row key={p.id} p={p} />)}
+          {data.posts.length === 0 && data.pinned.length === 0 && <div style={{ textAlign: "center", color: "#cbd5e1", fontSize: 13, padding: "50px 0" }}>아직 글이 없습니다. 첫 글을 써보세요!</div>}
+        </div>
+      )}
+      {mode === "list" && data.pages > 1 && (
         <div style={{ display: "flex", justifyContent: "center", gap: 4, padding: "12px", borderTop: "1px solid #f1f5f9" }}>
           {Array.from({ length: data.pages }, (_, i) => i + 1).map((n) => (
             <button key={n} onClick={() => setPage(n)} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid " + (page === n ? "#6366f1" : "#e2e8f0"), background: page === n ? "#6366f1" : "#fff", color: page === n ? "#fff" : "#64748b", cursor: "pointer", fontSize: 12, fontWeight: page === n ? 700 : 400 }}>{n}</button>
@@ -173,11 +235,12 @@ function PostList({ board, me, onOpen, onWrite }) {
 }
 
 // ── 글 상세 ────────────────────────────────────────────────────────────────────
-function PostDetail({ postId, board, me, humans, onBack, onDeleted, onEdit }) {
+function PostDetail({ postId, board, me, humans, activeProject, onBack, onDeleted, onEdit }) {
   const [post, setPost] = useState(null);
   const [comments, setComments] = useState([]);
   const [ctext, setCtext] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
+  const [kanbanMsg, setKanbanMsg] = useState("");
 
   const load = () => fetch(`${API}/api/posts/${postId}`).then((r) => r.json()).then(setPost).catch(() => {});
   const loadC = () => fetch(`${API}/api/posts/${postId}/comments`).then((r) => r.json()).then((d) => setComments(Array.isArray(d) ? d : [])).catch(() => {});
@@ -191,6 +254,7 @@ function PostDetail({ postId, board, me, humans, onBack, onDeleted, onEdit }) {
   const markRead = async () => { await fetch(`${API}/api/posts/${postId}/read`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: me?.id }) }); load(); };
   const togglePin = async () => { await fetch(`${API}/api/posts/${postId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !post.pinned }) }); load(); };
   const setStatus = async (s) => { await fetch(`${API}/api/posts/${postId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: s }) }); load(); };
+  const toKanban = async () => { try { await fetch(`${API}/api/projects/${activeProject}/kanban/cards`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: post.title, desc: (post.body || "") + `\n\n📋 게시판 업무요청: ${board.name}`, column: "todo", projectId: activeProject }) }); setKanbanMsg("✅ 칸반에 추가됨"); setTimeout(() => setKanbanMsg(""), 2500); } catch {} };
   const del = async () => { await fetch(`${API}/api/posts/${postId}`, { method: "DELETE" }); onDeleted(); };
   const submitComment = async () => {
     if (!ctext.trim()) return;
@@ -213,15 +277,21 @@ function PostDetail({ postId, board, me, humans, onBack, onDeleted, onEdit }) {
         </span>
       </div>
       <div style={{ maxWidth: 800, margin: "0 auto", padding: "20px 24px 50px" }}>
-        <div style={{ fontSize: 21, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>{post.title}</div>
+        <div style={{ fontSize: 21, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>
+          {post.flair && <span style={{ fontSize: 13, color: "#4338ca", background: "#eef2ff", padding: "2px 10px", borderRadius: 7, marginRight: 8, verticalAlign: "middle", fontWeight: 700 }}>{post.flair}</span>}
+          {(post.likes?.length >= 3) && <span style={{ fontSize: 12, color: "#fff", background: "#ef4444", padding: "2px 8px", borderRadius: 7, marginRight: 8, verticalAlign: "middle", fontWeight: 700 }}>개념</span>}
+          {post.title}
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#94a3b8", paddingBottom: 12, borderBottom: "1px solid #f1f5f9", marginBottom: 16, flexWrap: "wrap" }}>
           <span style={{ color: "#475569", fontWeight: 600 }}>{post.authorAvatar} {post.authorName}</span>
           <span>· {fmtFull(post.createdAt)}</span><span>· 👁 {post.views}</span>
           {board.type === "request" && (
-            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5 }}>상태
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>상태
               <select value={post.status || "요청"} onChange={(e) => setStatus(e.target.value)} style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "2px 6px", fontSize: 11 }}>
                 <option>요청</option><option>진행</option><option>완료</option>
               </select>
+              {kanbanMsg ? <span style={{ fontSize: 11, color: "#16a34a", fontWeight: 700 }}>{kanbanMsg}</span>
+                : <button onClick={toKanban} style={{ border: "1px solid #c7d2fe", background: "#eef2ff", color: "#4338ca", borderRadius: 6, padding: "3px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>📌 칸반 카드로</button>}
             </span>
           )}
           {(post.tags || []).map((t) => <span key={t} style={{ background: "#f1f5f9", padding: "1px 7px", borderRadius: 8, color: "#64748b" }}>#{t}</span>)}
@@ -281,6 +351,7 @@ function PostWrite({ board, me, humans, onCancel, onDone }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [tags, setTags] = useState("");
+  const [flair, setFlair] = useState((board.flairs && board.flairs[0]) || "");
   const [anonymous, setAnonymous] = useState(board.anonymous);
   const [attachments, setAttachments] = useState([]);
   const [driveRefs, setDriveRefs] = useState([]);
@@ -297,7 +368,7 @@ function PostWrite({ board, me, humans, onCancel, onDone }) {
 
   const submit = async () => {
     if (!title.trim()) { alert("제목을 입력하세요"); return; }
-    const p = await (await fetch(`${API}/api/boards/${board.id}/posts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, body, tags: tags.split(",").map((t) => t.trim()).filter(Boolean), anonymous, authorId: me?.id, authorName: me?.name, authorAvatar: me?.avatar, attachments, driveRefs, mentions: (body.match(/@(\S+)/g) || []).map((m) => humans.find((h) => h.name === m.slice(1))?.id).filter(Boolean) }) })).json();
+    const p = await (await fetch(`${API}/api/boards/${board.id}/posts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, body, flair, tags: tags.split(",").map((t) => t.trim()).filter(Boolean), anonymous, authorId: me?.id, authorName: me?.name, authorAvatar: me?.avatar, attachments, driveRefs, mentions: (body.match(/@(\S+)/g) || []).map((m) => humans.find((h) => h.name === m.slice(1))?.id).filter(Boolean) }) })).json();
     onDone(p);
   };
   const TB = ({ l, on, t }) => <button onClick={on} title={t} style={{ border: "1px solid #e2e8f0", background: "#fff", borderRadius: 5, padding: "4px 8px", fontSize: 11, cursor: "pointer", color: "#475569" }}>{l}</button>;
@@ -311,6 +382,11 @@ function PostWrite({ board, me, humans, onCancel, onDone }) {
         <button onClick={submit} style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 7, padding: "7px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>등록</button>
       </div>
       <div style={{ padding: "10px 18px", display: "flex", gap: 8, borderBottom: "1px solid #f1f5f9" }}>
+        {(board.flairs || []).length > 0 && (
+          <select value={flair} onChange={(e) => setFlair(e.target.value)} style={{ width: 96, border: "1px solid #e2e8f0", borderRadius: 7, padding: "9px 8px", fontSize: 13, fontWeight: 600, outline: "none", color: "#4338ca", background: "#f8faff" }}>
+            {board.flairs.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+        )}
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="제목" style={{ flex: 1, border: "1px solid #e2e8f0", borderRadius: 7, padding: "9px 12px", fontSize: 15, fontWeight: 600, outline: "none", color: "#1e293b" }} />
         <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="태그(쉼표)" style={{ width: 150, border: "1px solid #e2e8f0", borderRadius: 7, padding: "9px 12px", fontSize: 12, outline: "none", color: "#1e293b" }} />
       </div>
@@ -396,6 +472,113 @@ function NotiDropdown({ notis, onClose, onRead, onOpen }) {
           <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>{fmtFull(n.createdAt)}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// 게시판 홈 — 카드 그리드 (왼쪽 리스트 대신 직관적인 진입)
+function BoardHome({ onOpen, onOpenPost }) {
+  const [boards, setBoards] = useState([]);
+  const [recent, setRecent] = useState([]);
+  const [feedView, setFeedView] = useState("전체");  // 전체 | 베스트
+  useEffect(() => {
+    fetch(`${API}/api/boards/summary`).then((r) => r.json()).then((d) => setBoards(Array.isArray(d) ? d : [])).catch(() => {});
+    fetch(`${API}/api/posts/recent?limit=60`).then((r) => r.json()).then((d) => setRecent(Array.isArray(d) ? d : [])).catch(() => {});
+  }, []);
+  const groups = boards.reduce((m, b) => { (m[b.group || "기타"] = m[b.group || "기타"] || []).push(b); return m; }, {});
+  const ranked = [...boards].sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 8);
+  const best = [...recent].filter((p) => (p.likes || 0) >= 3).sort((a, b) => (b.likes || 0) - (a.likes || 0));
+  const feed = feedView === "베스트" ? best : recent;
+
+  const FeedRow = ({ p }) => (
+    <div onClick={() => onOpenPost(p.boardId, p.id)} style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #f1f5f9", cursor: "pointer", fontSize: 13, background: "#fff" }}
+      onMouseEnter={(e) => e.currentTarget.style.background = "#f6f8fb"} onMouseLeave={(e) => e.currentTarget.style.background = "#fff"}>
+      <span style={{ width: 118, flexShrink: 0, fontSize: 11, color: "#64748b", padding: "9px 10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.boardIcon} {p.boardName}</span>
+      <div style={{ flex: 1, minWidth: 0, padding: "9px 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {(p.likes || 0) >= 3 && <span style={{ fontSize: 10, color: "#fff", background: "#ef4444", padding: "1px 6px", borderRadius: 5, marginRight: 6, fontWeight: 700 }}>개념</span>}
+        <span style={{ color: "#1e293b", fontWeight: 500 }}>{p.title}</span>
+        {p.comments > 0 && <span style={{ marginLeft: 6, fontSize: 12, color: "#ef4444", fontWeight: 700 }}>[{p.comments}]</span>}
+        {p.hasThumb && <span style={{ marginLeft: 5, fontSize: 11 }}>🖼</span>}
+      </div>
+      <span style={{ width: 82, fontSize: 11.5, color: "#475569", flexShrink: 0, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.avatar} {p.author}</span>
+      <span style={{ width: 50, fontSize: 11, color: "#94a3b8", flexShrink: 0, textAlign: "center" }}>{fmtDate(p.date)}</span>
+      <span style={{ width: 38, fontSize: 11, color: "#94a3b8", flexShrink: 0, textAlign: "center" }}>{p.views}</span>
+      <span style={{ width: 38, fontSize: 11, color: (p.likes >= 3) ? "#ef4444" : "#cbd5e1", fontWeight: (p.likes >= 3) ? 700 : 400, flexShrink: 0, textAlign: "center" }}>{p.likes || 0}</span>
+    </div>
+  );
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", background: "#f1f5f9", padding: "16px 20px 40px" }}>
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", maxWidth: 1180, margin: "0 auto" }}>
+        {/* 좌측: 실시간 전체글 */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "4px 14px 0", borderBottom: "1px solid #e2e8f0" }}>
+              <button onClick={() => setFeedView("전체")} style={{ border: "none", borderBottom: "2px solid " + (feedView === "전체" ? "#6366f1" : "transparent"), background: "transparent", color: feedView === "전체" ? "#4338ca" : "#94a3b8", padding: "10px 14px", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>🔥 실시간 전체글</button>
+              <button onClick={() => setFeedView("베스트")} style={{ border: "none", borderBottom: "2px solid " + (feedView === "베스트" ? "#ef4444" : "transparent"), background: "transparent", color: feedView === "베스트" ? "#dc2626" : "#94a3b8", padding: "10px 14px", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>⭐ 개념글 베스트</button>
+              <span style={{ marginLeft: "auto", fontSize: 10.5, color: "#cbd5e1", paddingBottom: 6 }}>추천 3개 이상 = 개념글</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: 10.5, color: "#94a3b8", fontWeight: 600 }}>
+              <span style={{ width: 118, padding: "6px 10px" }}>게시판</span>
+              <span style={{ flex: 1, padding: "0 6px" }}>제목</span>
+              <span style={{ width: 82, textAlign: "center" }}>글쓴이</span>
+              <span style={{ width: 50, textAlign: "center" }}>작성일</span>
+              <span style={{ width: 38, textAlign: "center" }}>조회</span>
+              <span style={{ width: 38, textAlign: "center" }}>추천</span>
+            </div>
+            {feed.map((p) => <FeedRow key={p.id} p={p} />)}
+            {feed.length === 0 && <div style={{ textAlign: "center", color: "#cbd5e1", fontSize: 13, padding: "40px 0" }}>{feedView === "베스트" ? "아직 개념글이 없습니다 (추천 3개 이상)" : "아직 글이 없습니다"}</div>}
+          </div>
+        </div>
+
+        {/* 우측: 게시판 목록 + 인기 랭킹 */}
+        <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: "#1e293b", marginBottom: 8 }}>🏆 인기 게시판</div>
+            {ranked.map((b, i) => (
+              <div key={b.id} onClick={() => onOpen(b.id)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", cursor: "pointer", borderRadius: 6 }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "#f6f8fb"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                <span style={{ width: 16, fontSize: 12, fontWeight: 800, color: i < 3 ? "#ef4444" : "#cbd5e1", textAlign: "center" }}>{i + 1}</span>
+                <span style={{ fontSize: 14 }}>{b.icon}</span>
+                <span style={{ flex: 1, fontSize: 12.5, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                <span style={{ fontSize: 10.5, color: "#94a3b8" }}>{b.count}</span>
+              </div>
+            ))}
+          </div>
+          {Object.entries(groups).map(([g, list]) => (
+            <div key={g} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: "#64748b", marginBottom: 6 }}>{g}</div>
+              {list.map((b) => (
+                <div key={b.id} onClick={() => onOpen(b.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 4px", cursor: "pointer", borderRadius: 6 }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "#f6f8fb"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                  <span style={{ fontSize: 14 }}>{b.icon}</span>
+                  <span style={{ flex: 1, fontSize: 12.5, color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                  {b.secret ? <span style={{ fontSize: 9, color: "#dc2626" }}>🔒</span>
+                    : b.type === "request" ? <span style={{ fontSize: 8.5, background: "#dcfce7", color: "#16a34a", padding: "1px 5px", borderRadius: 5 }}>요청</span> : null}
+                  <span style={{ fontSize: 10, color: "#cbd5e1" }}>{b.count}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 통합검색 결과
+function SearchResults({ gres, q, onOpenPost, onClear }) {
+  const { boards = [], wiki = [], drive = [] } = gres || {};
+  const total = boards.length + wiki.length + drive.length;
+  const Sec = ({ title, children }) => <div style={{ marginBottom: 18 }}><div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", marginBottom: 8 }}>{title}</div>{children}</div>;
+  const rowS = { border: "1px solid #f1f5f9", borderRadius: 8, padding: "10px 12px", marginBottom: 6 };
+  return (
+    <div style={{ flex: 1, overflowY: "auto", background: "#fff", padding: "18px 24px" }}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: "#1e293b", marginBottom: 14 }}>🔍 "{q}" 통합검색 <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 400 }}>· {total}건</span> <span onClick={onClear} style={{ marginLeft: 8, fontSize: 11, color: "#6366f1", cursor: "pointer" }}>✕ 닫기</span></div>
+      {total === 0 && <div style={{ color: "#cbd5e1", fontSize: 13, padding: "30px 0", textAlign: "center" }}>결과 없음</div>}
+      {boards.length > 0 && <Sec title="📋 게시판">{boards.map((b) => <div key={b.id} onClick={() => onOpenPost(b.boardId, b.id)} style={{ ...rowS, cursor: "pointer" }}><b style={{ fontSize: 13, color: "#1e293b" }}>{b.boardIcon} {b.title}</b><div style={{ fontSize: 11.5, color: "#64748b", marginTop: 3 }}>{b.snippet}</div><div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 3 }}>{b.boardName} · {b.author}</div></div>)}</Sec>}
+      {wiki.length > 0 && <Sec title="📖 위키/매뉴얼">{wiki.map((w) => <div key={w.id} style={rowS}><b style={{ fontSize: 13, color: "#1e293b" }}>{w.type === "manual" ? "📋" : "📖"} {w.title}</b><div style={{ fontSize: 11.5, color: "#64748b", marginTop: 3 }}>{w.snippet}</div></div>)}</Sec>}
+      {drive.length > 0 && <Sec title="📁 회사 드라이브">{drive.map((d, i) => <div key={i} style={rowS}><b style={{ fontSize: 13, color: "#1e293b" }}>{d.type === "image" ? "🖼" : d.type === "video" ? "🎬" : "📄"} {d.name}</b><div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 3 }}>{d.folder}{d.hasText ? " · 본문있음" : ""}</div></div>)}</Sec>}
     </div>
   );
 }
