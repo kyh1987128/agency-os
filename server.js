@@ -2806,19 +2806,90 @@ app.patch("/api/humans/:id", (req, res) => {
 });
 
 // ── 회사 정보 (이름·주소·대표·로고·바로가기 링크) ──────────────────────────────
-const COMPANY_DEFAULT = { name: "콘텐츠잇다", address: "", ceo: "", bizno: "", phone: "", email: "", logo: "", intro: "", links: [] };
+const COMPANY_DEFAULT = {
+  name: "콘텐츠잇다", address: "", ceo: "", bizno: "", phone: "", email: "", logo: "", intro: "",
+  founded: "", industry: "", homepage: "", slogan: "", vision: "",
+  account: "", accountBank: "", accountHolder: "",
+  seal: "",                                  // 직인 이미지 URL/data
+  hours: "평일 09:00 ~ 18:00 (점심 12~13)", holiday: "토·일·공휴일",
+  sns: { instagram: "", youtube: "", facebook: "", blog: "", x: "" },
+  rules: [],                                 // 회사 규정 PDF 첨부 [{name,url}]
+  links: [],                                 // 바로가기
+  registerCode: "cidhub2026",                // 회원가입 코드
+  notice: { text: "", level: "info", on: false }, // 사내 공지 배너
+};
 function loadCompany() {
   const fp = path.join(DATA_DIR, "company.json");
   if (!fs.existsSync(fp)) return { ...COMPANY_DEFAULT };
   try { return { ...COMPANY_DEFAULT, ...JSON.parse(fs.readFileSync(fp, "utf8")) }; } catch { return { ...COMPANY_DEFAULT }; }
 }
 function saveCompany(d) { fs.writeFileSync(path.join(DATA_DIR, "company.json"), JSON.stringify(d, null, 2), "utf8"); }
-app.get("/api/company", (_, res) => res.json(loadCompany()));
+// 공개용(가입코드 같은 민감 필드 가림)
+const publicCompany = (c) => { const { registerCode, ...rest } = c || {}; return rest; };
+app.get("/api/company", (_, res) => res.json(publicCompany(loadCompany())));
 app.patch("/api/company", (req, res) => {
   const c = { ...loadCompany(), ...(req.body || {}) };
   saveCompany(c);
   broadcastMessage({ type: "data_update", resource: "company" });
-  res.json(c);
+  res.json(publicCompany(c));
+});
+// 가입코드 — 관리자만 (가입 시엔 코드 일치만 보고 코드 자체는 노출 안 함)
+app.get("/api/company/code", (_, res) => res.json({ code: loadCompany().registerCode || "" }));
+app.patch("/api/company/code", (req, res) => {
+  const code = String(req.body?.code || "").trim();
+  if (!code) return res.status(400).json({ error: "코드를 입력하세요" });
+  const c = { ...loadCompany(), registerCode: code };
+  saveCompany(c);
+  res.json({ ok: true });
+});
+
+// ── 외부 협력사 ───────────────────────────────────────────────────────────────
+const partnersPath = () => path.join(DATA_DIR, "partners.json");
+function loadPartners() { try { return JSON.parse(fs.readFileSync(partnersPath(), "utf8")); } catch { return []; } }
+function savePartners(d) { fs.writeFileSync(partnersPath(), JSON.stringify(d, null, 2), "utf8"); }
+app.get("/api/partners", (_, res) => res.json(loadPartners()));
+app.post("/api/partners", (req, res) => {
+  const { name, kind, contact, email, phone, projects, note } = req.body || {};
+  if (!name?.trim()) return res.status(400).json({ error: "상호/이름을 입력하세요" });
+  const list = loadPartners();
+  const p = { id: "p_" + randomUUID().slice(0, 8), name: name.trim(), kind: kind || "외주", contact: contact || "", email: email || "", phone: phone || "", projects: projects || [], note: note || "", createdAt: new Date().toISOString() };
+  list.push(p); savePartners(list);
+  broadcastMessage({ type: "data_update", resource: "partners" });
+  res.status(201).json(p);
+});
+app.patch("/api/partners/:id", (req, res) => {
+  const list = loadPartners();
+  const idx = list.findIndex((p) => p.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: "not found" });
+  list[idx] = { ...list[idx], ...req.body };
+  savePartners(list);
+  broadcastMessage({ type: "data_update", resource: "partners" });
+  res.json(list[idx]);
+});
+app.delete("/api/partners/:id", (req, res) => {
+  savePartners(loadPartners().filter((p) => p.id !== req.params.id));
+  broadcastMessage({ type: "data_update", resource: "partners" });
+  res.json({ ok: true });
+});
+
+// ── 회사 공휴일 ───────────────────────────────────────────────────────────────
+const holidaysPath = () => path.join(DATA_DIR, "holidays.json");
+function loadHolidays() { try { return JSON.parse(fs.readFileSync(holidaysPath(), "utf8")); } catch { return []; } }
+function saveHolidays(d) { fs.writeFileSync(holidaysPath(), JSON.stringify(d, null, 2), "utf8"); }
+app.get("/api/holidays", (_, res) => res.json(loadHolidays()));
+app.post("/api/holidays", (req, res) => {
+  const { date, name, recurring } = req.body || {};
+  if (!date || !name) return res.status(400).json({ error: "일자와 이름이 필요합니다" });
+  const list = loadHolidays();
+  const h = { id: "hol_" + randomUUID().slice(0, 6), date, name, recurring: !!recurring };
+  list.push(h); saveHolidays(list);
+  broadcastMessage({ type: "data_update", resource: "holidays" });
+  res.status(201).json(h);
+});
+app.delete("/api/holidays/:id", (req, res) => {
+  saveHolidays(loadHolidays().filter((h) => h.id !== req.params.id));
+  broadcastMessage({ type: "data_update", resource: "holidays" });
+  res.json({ ok: true });
 });
 
 // DELETE /api/humans/:id
@@ -2877,18 +2948,32 @@ app.post("/api/users/:id/password", (req, res) => {
   if (idx === -1) return res.status(404).json({ error: "사용자를 찾을 수 없습니다" });
   if (humans[idx].passwordHash && !verifyPw(current, humans[idx].passwordHash)) return res.status(401).json({ error: "현재 비밀번호가 일치하지 않습니다" });
   humans[idx].passwordHash = hashPw(next);
+  humans[idx].mustChangePw = false;     // 변경 완료
   saveHumans(humans);
   res.json({ ok: true, user: pubUser(humans[idx]) });
 });
 
-// POST /api/register { name, email, password, code } — 회원가입(공개 노출 대비 가입 코드 필요)
-const REGISTER_CODE = process.env.REGISTER_CODE || "cidhub2026";
+// POST /api/users/:id/password/reset — 관리자가 임시 비번 발급(본인 비번 분실 시)
+app.post("/api/users/:id/password/reset", (req, res) => {
+  const humans = loadHumans();
+  const idx = humans.findIndex((h) => h.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "사용자 없음" });
+  // 임시 비번 생성: 8자 영숫자
+  const temp = Array.from({ length: 8 }, () => "abcdefghjkmnpqrstuvwxyz23456789"[Math.floor(Math.random() * 31)]).join("");
+  humans[idx].passwordHash = hashPw(temp);
+  humans[idx].mustChangePw = true;
+  saveHumans(humans);
+  res.json({ ok: true, tempPassword: temp });
+});
+
+// POST /api/register { name, email, password, code } — 회원가입(회사 가입 코드 필요)
 app.post("/api/register", (req, res) => {
   if (_loginLimited(req)) return res.status(429).json({ error: "시도가 너무 많습니다. 잠시 후 다시 시도하세요" });
   const { name, email, password, code } = req.body || {};
   if (!name?.trim() || !email?.trim() || !password) return res.status(400).json({ error: "이름·이메일·비밀번호를 모두 입력하세요" });
   if (String(password).length < 4) return res.status(400).json({ error: "비밀번호는 4자 이상이어야 합니다" });
-  if (String(code || "").trim() !== REGISTER_CODE) return res.status(403).json({ error: "회사 가입 코드가 올바르지 않습니다" });
+  const currentCode = loadCompany().registerCode || "cidhub2026";
+  if (String(code || "").trim() !== currentCode) return res.status(403).json({ error: "회사 가입 코드가 올바르지 않습니다" });
   const humans = loadHumans();
   if (humans.some((h) => (h.email || "").toLowerCase() === String(email).toLowerCase().trim())) return res.status(409).json({ error: "이미 가입된 이메일입니다. 로그인하세요" });
   const human = { id: "h_" + randomUUID().slice(0, 8), name: name.trim(), email: String(email).toLowerCase().trim(), title: "", deptId: "", avatar: "👤", color: "#6366f1", status: "active", mood: "", role: "member", passwordHash: hashPw(password) };

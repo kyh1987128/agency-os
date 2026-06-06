@@ -53,6 +53,8 @@ function LoginScreen({ onLogin }) {
       const j = await r.json();
       if (j.needSetup) { setSetupId(j.userId); setSetupName(j.name || ""); setPw(""); setMode("setup"); setBusy(false); return; }
       if (!r.ok) { setErr(j.error || "로그인 실패"); setBusy(false); return; }
+      // 임시 비번으로 들어왔으면 즉시 변경 요구
+      if (j.user?.mustChangePw) { setSetupId(j.user.id); setSetupName(j.user.name || ""); setPw(""); setPw2(""); setMode("setup"); setErr("임시 비밀번호로 로그인했습니다. 새 비밀번호를 설정하세요."); setBusy(false); return; }
       onLogin(j.user);
     } catch { setErr("서버에 연결할 수 없습니다"); setBusy(false); }
   };
@@ -83,7 +85,10 @@ function LoginScreen({ onLogin }) {
             <input value={pw} onChange={(e) => setPw(e.target.value)} type="password" placeholder="비밀번호" style={inp} onKeyDown={(e) => e.key === "Enter" && login()} />
             {err && <div style={{ color: "#dc2626", fontSize: 12, marginBottom: 10 }}>{err}</div>}
             <button onClick={login} disabled={busy} style={pbtn}>{busy ? "확인 중…" : "로그인"}</button>
-            <div style={{ fontSize: 12.5, color: "#64748b", textAlign: "center", marginTop: 14 }}>계정이 없으세요? <span onClick={() => { setMode("register"); setErr(""); setPw(""); setPw2(""); }} style={{ color: "#6366f1", fontWeight: 700, cursor: "pointer" }}>회원가입</span></div>
+            <div style={{ fontSize: 12, color: "#64748b", textAlign: "center", marginTop: 12 }}>
+              <span onClick={() => setMode("forgot")} style={{ color: "#94a3b8", cursor: "pointer", textDecoration: "underline" }}>비밀번호 잊으셨나요?</span>
+            </div>
+            <div style={{ fontSize: 12.5, color: "#64748b", textAlign: "center", marginTop: 10 }}>계정이 없으세요? <span onClick={() => { setMode("register"); setErr(""); setPw(""); setPw2(""); }} style={{ color: "#6366f1", fontWeight: 700, cursor: "pointer" }}>회원가입</span></div>
           </>
         )}
         {mode === "register" && (
@@ -96,6 +101,17 @@ function LoginScreen({ onLogin }) {
             {err && <div style={{ color: "#dc2626", fontSize: 12, marginBottom: 10 }}>{err}</div>}
             <button onClick={register} disabled={busy} style={pbtn}>{busy ? "가입 중…" : "회원가입하고 시작"}</button>
             <div style={{ fontSize: 12.5, color: "#64748b", textAlign: "center", marginTop: 14 }}>이미 계정이 있으세요? <span onClick={() => { setMode("login"); setErr(""); }} style={{ color: "#6366f1", fontWeight: 700, cursor: "pointer" }}>로그인</span></div>
+          </>
+        )}
+        {mode === "forgot" && (
+          <>
+            <div style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.7, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 9, padding: "12px 14px", marginBottom: 14 }}>
+              <b style={{ color: "#92400e" }}>📞 관리자에게 문의하세요</b><br />
+              관리자가 <b>설정 → 직원 관리 → 🔑 비번재설정</b> 으로<br />
+              <b>임시 비밀번호</b>를 발급해줍니다.<br />
+              발급받은 임시 비번으로 로그인하시면 새 비번을 정할 수 있어요.
+            </div>
+            <button onClick={() => { setMode("login"); setErr(""); }} style={pbtn}>로그인 화면으로</button>
           </>
         )}
         {mode === "setup" && (

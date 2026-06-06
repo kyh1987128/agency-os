@@ -13,6 +13,7 @@ import GanttView from "./components/GanttView";
 import CalendarView from "./components/CalendarView";
 import ArchiveView from "./components/ArchiveView";
 import SettingsView from "./components/SettingsView";
+import NoticeBanner from "./components/NoticeBanner";
 import Modal from "./components/Modal";
 import { COLORS } from "./data/mockData";
 
@@ -125,7 +126,9 @@ export default function App() {
   }, []);
 
   return (
-    <div style={{ display: "flex", height: "100vh", background: B, color: T, fontFamily: "system-ui,-apple-system,sans-serif", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: B, color: T, fontFamily: "system-ui,-apple-system,sans-serif", overflow: "hidden" }}>
+      <NoticeBanner />
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
       <LeftPanel
         tab={tab}
         setTab={setTab}
@@ -261,6 +264,7 @@ export default function App() {
         </>
       )}
       {modal && <Modal item={modal} onClose={() => setModal(null)} activeProject={activeProject} projData={computedProjData} />}
+      </div>
     </div>
   );
 }
